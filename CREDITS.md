@@ -1,5 +1,5 @@
 ## Christopher Williams
-<img src="https://github.com/gnulinuxadmin/FeralCTF/blob/main/chris.jpg?raw=true" width="250" height="250" alt="Chris">
+<img src="https://github.com/gnulinuxadmin/FeralCTF/blob/main/chris.jpg?raw=true" width="250" height="342" alt="Chris">
 *Bit Fiddler, DevOps, UNIX/Linux, Cyber Security, Ethical Hacker.*
 Initial spec, coding, pinch hitting, bug squashing, LLM wrangling,
 vibing with ollama in one hand and git restore in the other.
