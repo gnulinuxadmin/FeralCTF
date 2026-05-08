@@ -20,7 +20,7 @@ and acorns that uses tokens on a RTX 4060 like electricity is free.
 **Feature coder and specialized mess maker.**
 
 Bangs out features that may work or may catch fire but sometimes
-the author of working and ocasionally poignant code.
+the author of working and occasionally poignant code.
 
 ## Claude Sonnet
 <img src="https://github.com/gnulinuxadmin/FeralCTF/blob/main/cleanup.jpg?raw=true" width="250" height="250" alt="Claude" />
