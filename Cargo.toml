@@ -1,0 +1,17 @@
+[package]
+name = "FeralCTF"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+argon2 = "0.5.3"
+axum = "0.8.9"
+dashmap = "6.1.0"
+jsonwebtoken = "10.3.0"
+rusqlite = "0.37.0"
+rust-embed = "8.11.0"
+serde = "1.0.228"
+tokio = "1.52.3"
+tower-http = "0.6.10"
+tracing = "0.1.44"
+zip = "8.6.0"
