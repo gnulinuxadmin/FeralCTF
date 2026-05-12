@@ -1,6 +1,6 @@
 use axum::{
-    extract::{State, WebSocketUpgrade},
     extract::ws::{Message, WebSocket},
+    extract::{State, WebSocketUpgrade},
     response::IntoResponse,
 };
 use serde::Serialize;
@@ -58,10 +58,7 @@ impl Default for WsHub {
 }
 
 // GET /ws — no auth required; events are public scoreboard data
-pub async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
@@ -80,10 +77,10 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                 tokio::select! {
                     ev = rx.recv() => match ev {
                         Ok(event) => {
-                            if let Ok(json) = serde_json::to_string(&event) {
-                                if outbox_tx.send(Message::Text(json.into())).is_err() {
-                                    break;
-                                }
+                            if let Ok(json) = serde_json::to_string(&event)
+                                && outbox_tx.send(Message::Text(json.into())).is_err()
+                            {
+                                break;
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -142,7 +139,10 @@ mod tests {
             title: "hello".into(),
             body: "world".into(),
         });
-        assert!(matches!(rx.try_recv().unwrap(), WsEvent::Announcement { .. }));
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            WsEvent::Announcement { .. }
+        ));
     }
 
     #[tokio::test]

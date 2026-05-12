@@ -14,19 +14,22 @@ Sprints complete:
 - Sprint 5 - Auth handlers
 - Sprint 6 - Challenge handlers + flag submission
 - Sprint 7 - Scoreboard + cache
+- Sprint 8 - WebSocket hub
+- Sprint 9 - Admin console APIs
+- Sprint 10 - Import / Export
 
 Current state file should read:
 
 ```text
-SPRINT 7 DONE
-DONE_COUNT: 8
+SPRINT 10 DONE
+DONE_COUNT: 11
 TOTAL_SPRINTS: 14
-SPRINTS_REMAINING: 6
+SPRINTS_REMAINING: 3
 ```
 
 Next sprint:
 
-- Sprint 8 - WebSocket Hub
+- Sprint 11 - Anti-Cheat + Rate Limiting
 
 ## Verified Baseline
 
@@ -41,7 +44,7 @@ cargo clippy --all-targets --all-features
 Last known test count:
 
 ```text
-31 passed
+43 passed
 ```
 
 ## Key Implementation Notes
@@ -156,11 +159,50 @@ Important Sprint 5 details:
 - Sprint 6 challenge listing now uses `AppCache::get_or_build_challenges()`.
 - Correct submissions and team create/join invalidate the scoreboard cache.
 
+### Sprint 8
+
+- `src/handlers/ws.rs` implements the public WebSocket hub.
+- `GET /ws` streams serialized `WsEvent` messages.
+- Correct flag submissions broadcast `NewSolve` and `ScoreUpdate`.
+- WebSocket sender/receiver work is split so broadcasts do not block socket reads.
+
+### Sprint 9
+
+- `src/handlers/admin.rs` implements admin authorization and admin APIs.
+- Admin APIs include dashboard, challenge CRUD, submission log, users, teams, competition controls, announcements, and SQLite backup.
+- Admin routes are wired through `require_admin` middleware in `src/routes.rs`.
+- Challenge creation/update hashes static flags before storage and stores regex flags as patterns.
+- Backup uses SQLite backup API and returns a database download.
+
+### Sprint 10
+
+- `src/import_export.rs` implements `ExportBundle`, `ExportChallenge`, `ImportOptions`, `ImportResult`, and preview structs.
+- `import_export::export()` exports competition metadata, categories, challenges, hints, files, tags, and slug-based unlock dependencies.
+- Inline attachment export uses base64 for stored files up to the Sprint 10 inline limit.
+- `import_export::import()` validates first, supports dry-run, creates/skips/overwrites by slug, and wraps writes in a transaction.
+- Import is idempotent for matching bundles.
+- Import resolves `unlock_requires` by slug after newly created challenge IDs exist.
+- `detect_and_convert_ctfd()` accepts FeralCTF JSON, CTFd-style JSON, and ZIPs containing JSON.
+- CTFd dynamic challenges import as hidden for admin review.
+- Admin endpoints:
+  - `GET /api/admin/export` — JSON export
+  - `GET /api/admin/export?attachments=inline` — JSON with base64 files
+  - `GET /api/admin/export?attachments=zip` — ZIP containing challenges.json + attachment files
+  - `POST /api/admin/import` as multipart upload with `file`, `overwrite`, `dry_run`, and optional `attachments` (ZIP of challenge files extracted to `storage.attachments_path` before import; skipped for dry_run)
+- CLI import command:
+
+```bash
+feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
+```
+
+- Important caveat: the current schema stores static flags only as salted hashes, so existing static flags cannot be exported as plaintext. FeralCTF exports include verifier fields (`flag_hash`, `flag_salt`) to make FeralCTF-to-FeralCTF round-trips lossless. External/plaintext imports still hash flags before storage.
+
 ## Known Cautions
 
 - Do not revive old single-connection database abstractions.
 - Do not add frontend build tooling.
 - Do not store plaintext flags.
 - Do not expose flag hashes or salts in public responses.
+- Admin export is sensitive; FeralCTF export bundles may contain plaintext regex flags and static flag verifier data.
 - Do not edit spec files.
 - Do not advance `FERALCTF_SPRINTS.state` until verification passes.

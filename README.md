@@ -1,8 +1,6 @@
 # FeralCTF
 
-<p align="center">
-  <img src="feral10.jpg" alt="FeralCTF logo" width="180">
-</p>
+![FeralCTF logo](feral10.jpg)
 
 FeralCTF is a lightweight, self-hosted Capture The Flag platform for academic, nonprofit, workshop, and small-to-medium competition environments. The goal is a simple deployment story: one Rust binary, SQLite storage, embedded frontend assets, and no required database server, Node.js runtime, Docker stack, or external services.
 
@@ -14,16 +12,16 @@ For the complete technical design, schema, API details, security model, and road
 
 FeralCTF is under active development.
 
-The backend foundation is now in place through live WebSocket support. Admin functionality is the current area of work.
+The backend foundation is now in place through admin import/export support. Anti-cheat/rate limiting is the current area of work.
 
 Status summary:
 
 - Core backend foundations are implemented.
-- Player authentication, teams, challenges, scoring, scoreboard, and live event plumbing are in place.
-- Admin functionality is actively being built.
+- Player authentication, teams, challenges, scoring, scoreboard, live event plumbing, and admin controls are in place.
+- Challenge import/export is implemented, including dry-run import and CTFd detection.
 - The codebase is regularly checked with `cargo check`, `cargo test`, and `cargo clippy --all-targets --all-features`.
 
-The HTTP server startup, full admin interface, import/export workflow, frontend SPA, release hardening, and final single-binary packaging are still upcoming.
+The HTTP server startup, anti-cheat/rate limiting, frontend SPA, release hardening, and final single-binary packaging are still upcoming.
 
 ## Architecture Overview
 
@@ -102,6 +100,14 @@ The following pieces are implemented:
 - Public `/ws` event stream
 - WebSocket event serialization
 - New solve and score update event support
+- Admin-only challenge CRUD
+- Admin user and team management
+- Competition control and announcement endpoints
+- SQLite backup endpoint
+- Challenge bundle export (JSON, JSON with inline base64 attachments, or ZIP with attachment files)
+- Challenge bundle import with dry-run and overwrite modes, including attachment ZIP upload
+- CTFd JSON/ZIP import detection and conversion
+- CLI challenge import command
 
 ## How The Finished Application Will Work
 
@@ -174,6 +180,7 @@ Operational expectations:
 - Run one FeralCTF process per competition.
 - Back up the SQLite database before and after major event milestones.
 - Keep `config.toml` and exports containing plaintext flags private.
+- Existing static flags are stored as salted hashes and cannot be recovered as plaintext; FeralCTF exports include verifier data so FeralCTF-to-FeralCTF round-trips remain lossless.
 - Use a strong `auth.jwt_secret`.
 - Store attachments outside any public webroot.
 - Put production instances behind HTTPS.
@@ -182,26 +189,18 @@ Operational expectations:
 
 Current focus:
 
-- Admin handlers
-- Admin-only challenge CRUD
-- Admin user/team management
-- Competition controls
-- Announcements
-- Backup endpoint
-- Admin authorization checks
+- Anti-cheat and rate limiting
+- Submission sliding-window limits
+- Exponential backoff for repeated wrong submissions
+- Flag-sharing detection
 
 ## Upcoming Features
 
 Planned upcoming work includes:
 
-- Import/export of challenge bundles
-- CTFd compatibility import path
-- Anti-cheat and rate limiting
-- Exponential backoff for repeated wrong submissions
-- Flag-sharing detection
 - Frontend SPA for players and admins
 - Embedded frontend assets via `rust-embed`
-- CLI commands such as initialization, migration, and import
+- CLI commands such as initialization and migration
 - Security headers and HTTP hardening
 - Audit logging for admin actions
 - Release build validation and final deployment workflow
@@ -241,6 +240,27 @@ WebSocket:
 
 ```text
 GET /ws
+```
+
+Admin:
+
+```text
+GET  /api/admin
+POST /api/admin/challenges
+PUT  /api/admin/challenges/{id}
+DELETE /api/admin/challenges/{id}
+GET  /api/admin/submissions
+GET  /api/admin/users
+POST /api/admin/users/{id}/ban
+GET  /api/admin/teams
+POST /api/admin/teams/{id}/disqualify
+POST /api/admin/competition/start
+POST /api/admin/competition/end
+POST /api/admin/competition/freeze
+POST /api/admin/announce
+GET  /api/admin/export
+POST /api/admin/import
+GET  /api/admin/backup
 ```
 
 ## Development
@@ -291,6 +311,7 @@ src/
   db/                     # SQLite pool and migrations
   errors.rs               # application error type and JSON responses
   handlers/               # HTTP and WebSocket handlers
+  import_export.rs        # challenge bundle export/import and CTFd adapter
   models/                 # database-backed domain models
   routes.rs               # Axum route wiring
   scoring.rs              # dynamic scoring and score recalculation

@@ -46,6 +46,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 regex = "1"
+base64 = "0.22"
 
 # --- auth / crypto ---
 argon2 = "0.5"

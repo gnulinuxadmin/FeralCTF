@@ -166,17 +166,21 @@ pub async fn submit_flag(
         )
         .unwrap_or_default();
 
-    state.ws_hub.broadcast(crate::handlers::ws::WsEvent::NewSolve {
-        team: team_name,
-        challenge: challenge.title.clone(),
-        points: points_earned,
-        first_blood,
-    });
+    state
+        .ws_hub
+        .broadcast(crate::handlers::ws::WsEvent::NewSolve {
+            team: team_name,
+            challenge: challenge.title.clone(),
+            points: points_earned,
+            first_blood,
+        });
 
     if let Ok(sb) = crate::models::scoreboard::ScoreboardState::build(&conn) {
-        state.ws_hub.broadcast(crate::handlers::ws::WsEvent::ScoreUpdate {
-            scoreboard: sb.teams,
-        });
+        state
+            .ws_hub
+            .broadcast(crate::handlers::ws::WsEvent::ScoreUpdate {
+                scoreboard: sb.teams,
+            });
     }
 
     Ok(Json(SubmitResponse {

@@ -1,8 +1,8 @@
 use crate::AppState;
 use crate::handlers::admin::{
     announce, backup, ban_user, competition_end, competition_freeze, competition_start,
-    create_challenge, dashboard, delete_challenge, disqualify_team, get_teams, get_users,
-    list_submissions, require_admin, update_challenge,
+    create_challenge, dashboard, delete_challenge, disqualify_team, export_bundle, get_teams,
+    get_users, import_bundle, list_submissions, require_admin, update_challenge,
 };
 use crate::handlers::auth::{change_password, login, logout, me, register};
 use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
@@ -11,8 +11,7 @@ use crate::handlers::scoreboard::{
 };
 use crate::handlers::ws::ws_handler;
 use axum::{
-    Router,
-    middleware,
+    Router, middleware,
     routing::{delete, get, post, put},
 };
 
@@ -35,6 +34,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/admin/competition/end", post(competition_end))
         .route("/api/admin/competition/freeze", post(competition_freeze))
         .route("/api/admin/announce", post(announce))
+        .route("/api/admin/export", get(export_bundle))
+        .route("/api/admin/import", post(import_bundle))
         .route("/api/admin/backup", get(backup))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_admin));
 

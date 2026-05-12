@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::HeaderMap,
     middleware::Next,
     response::{IntoResponse, Json, Response},
@@ -7,14 +7,11 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AppState, auth,
+    AppState, WsEvent, auth,
     errors::{AppError, HandlerResult},
-    models::{
-        challenge::Challenge,
-        team::Team,
-        user::UserPublic,
-    },
-    scoring, WsEvent,
+    import_export::{self, ExportBundle, ImportOptions, ImportResult},
+    models::{challenge::Challenge, team::Team, user::UserPublic},
+    scoring,
 };
 
 // ---- request / response types ----
@@ -89,6 +86,17 @@ pub struct AnnounceRequest {
     pub title: String,
     pub body: String,
     pub challenge_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExportQuery {
+    pub attachments: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportQuery {
+    pub overwrite: Option<bool>,
+    pub dry_run: Option<bool>,
 }
 
 // ---- admin auth middleware ----
@@ -357,8 +365,7 @@ pub async fn get_users(State(state): State<AppState>) -> HandlerResult<Json<Vec<
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
-    let mut stmt =
-        conn.prepare("SELECT id, username, role, team_id FROM users ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT id, username, role, team_id FROM users ORDER BY id")?;
     let users = stmt
         .query_map([], |row| {
             Ok(UserPublic {
@@ -493,6 +500,101 @@ pub async fn announce(
     Ok(Json(serde_json::json!({ "sent": true })))
 }
 
+// ---- import / export ----
+
+pub async fn export_bundle(
+    State(state): State<AppState>,
+    Query(query): Query<ExportQuery>,
+) -> HandlerResult<Response> {
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    if matches!(query.attachments.as_deref(), Some("zip")) {
+        let zip_bytes = import_export::export_zip(&conn, &state.config)?;
+        Ok(axum::response::Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header(axum::http::header::CONTENT_TYPE, "application/zip")
+            .header(
+                axum::http::header::CONTENT_DISPOSITION,
+                "attachment; filename=\"feralctf-export.zip\"",
+            )
+            .body(axum::body::Body::from(zip_bytes))
+            .unwrap())
+    } else {
+        let inline_attachments = matches!(query.attachments.as_deref(), Some("inline"));
+        let bundle = import_export::export(&conn, &state.config, inline_attachments)?;
+        Ok(Json(bundle).into_response())
+    }
+}
+
+pub async fn import_bundle(
+    State(state): State<AppState>,
+    Query(query): Query<ImportQuery>,
+    mut multipart: Multipart,
+) -> HandlerResult<Json<ImportResult>> {
+    let mut file_bytes = None;
+    let mut attachment_zip: Option<Vec<u8>> = None;
+    let mut overwrite = query.overwrite.unwrap_or(false);
+    let mut dry_run = query.dry_run.unwrap_or(false);
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|err| AppError::BadRequest(format!("invalid multipart import: {err}")))?
+    {
+        let name = field.name().unwrap_or("").to_string();
+        match name.as_str() {
+            "file" => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|err| AppError::BadRequest(format!("invalid import file: {err}")))?;
+                file_bytes = Some(bytes.to_vec());
+            }
+            "attachments" => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|err| AppError::BadRequest(format!("invalid attachments zip: {err}")))?;
+                attachment_zip = Some(bytes.to_vec());
+            }
+            "overwrite" => {
+                let value = field.text().await.map_err(|err| {
+                    AppError::BadRequest(format!("invalid overwrite field: {err}"))
+                })?;
+                overwrite = parse_bool(&value);
+            }
+            "dry_run" => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|err| AppError::BadRequest(format!("invalid dry_run field: {err}")))?;
+                dry_run = parse_bool(&value);
+            }
+            _ => {}
+        }
+    }
+    let file_bytes = file_bytes.ok_or_else(|| AppError::BadRequest("file is required".into()))?;
+    let bundle = import_export::detect_and_convert_ctfd(&file_bytes)?;
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let options = ImportOptions { overwrite, dry_run };
+    let attachments_dir = std::path::Path::new(&state.config.storage.attachments_path);
+    if !dry_run {
+        if let Some(zip_bytes) = attachment_zip {
+            import_export::extract_attachments_zip(&zip_bytes, attachments_dir)?;
+        }
+    }
+    let result = import_export::import(&conn, &bundle, Some(attachments_dir), &options)?;
+    if !options.dry_run && result.valid {
+        state.cache.invalidate_challenges();
+        state.cache.invalidate_scoreboard();
+    }
+    Ok(Json(result))
+}
+
 // ---- backup ----
 
 pub async fn backup(State(state): State<AppState>) -> Response {
@@ -530,8 +632,7 @@ fn do_backup(state: &AppState) -> Result<(Vec<u8>, String), AppError> {
             .map_err(|e| anyhow::anyhow!("backup run: {e}"))?;
     }
     drop(dst);
-    let bytes =
-        std::fs::read(&tmp_path).map_err(|e| anyhow::anyhow!("backup read: {e}"))?;
+    let bytes = std::fs::read(&tmp_path).map_err(|e| anyhow::anyhow!("backup read: {e}"))?;
     let _ = std::fs::remove_file(&tmp_path);
     Ok((bytes, filename))
 }
@@ -560,18 +661,24 @@ fn generate_salt() -> String {
     out
 }
 
+fn parse_bool(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
 // ---- tests ----
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        auth,
+        WsHub, auth,
         cache::AppCache,
         config::Config,
         db,
         models::user::{RegisterRequest, User},
-        WsHub,
     };
     use axum::extract::State;
     use r2d2::Pool;
@@ -751,9 +858,7 @@ mod tests {
         let user = User::create(&conn, &req, "hash").unwrap();
         drop(conn);
 
-        let Json(result) = ban_user(State(state.clone()), Path(user.id))
-            .await
-            .unwrap();
+        let Json(result) = ban_user(State(state.clone()), Path(user.id)).await.unwrap();
         assert_eq!(result["banned"], true);
 
         let conn = state.db.get().unwrap();
