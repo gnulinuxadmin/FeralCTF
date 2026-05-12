@@ -158,6 +158,27 @@ pub async fn submit_flag(
     let new_score = team_score(&conn, team_id)?;
     insert_score_history(&conn, team_id, new_score, solved_at)?;
 
+    let team_name: String = conn
+        .query_row(
+            "SELECT name FROM teams WHERE id = ?1",
+            rusqlite::params![team_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_default();
+
+    state.ws_hub.broadcast(crate::handlers::ws::WsEvent::NewSolve {
+        team: team_name,
+        challenge: challenge.title.clone(),
+        points: points_earned,
+        first_blood,
+    });
+
+    if let Ok(sb) = crate::models::scoreboard::ScoreboardState::build(&conn) {
+        state.ws_hub.broadcast(crate::handlers::ws::WsEvent::ScoreUpdate {
+            scoreboard: sb.teams,
+        });
+    }
+
     Ok(Json(SubmitResponse {
         correct: true,
         points_earned,
@@ -322,6 +343,7 @@ mod tests {
             db: pool,
             config: Arc::new(config),
             cache: Arc::new(AppCache::new()),
+            ws_hub: Arc::new(crate::WsHub::new()),
         }
     }
 

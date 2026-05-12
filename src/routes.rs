@@ -5,6 +5,7 @@ use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, u
 use crate::handlers::scoreboard::{
     create_team, get_scoreboard, get_scoreboard_graph, get_team_profile, join_team,
 };
+use crate::handlers::ws::ws_handler;
 use axum::{
     Router,
     routing::{get, post, put},
@@ -36,4 +37,6 @@ pub fn create_router() -> Router<AppState> {
         .route("/api/admin", get(dashboard))
         .route("/api/admin/users", get(get_users))
         .route("/api/admin/teams", get(get_teams))
+        // WebSocket
+        .route("/ws", get(ws_handler))
 }

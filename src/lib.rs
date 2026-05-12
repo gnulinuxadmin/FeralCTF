@@ -23,10 +23,12 @@ pub struct AppState {
     pub db: db::DbPool,
     pub config: Arc<config::Config>,
     pub cache: Arc<cache::AppCache>,
+    pub ws_hub: Arc<handlers::ws::WsHub>,
 }
 
 pub use cache::AppCache;
 pub use config::Config;
 pub use database::{Database, DatabaseState, get_db_connection};
 pub use errors::{AppError, ErrorResponse};
+pub use handlers::ws::{WsEvent, WsHub};
 pub use models::scoreboard::ScoreboardState;

@@ -256,6 +256,7 @@ mod tests {
             db: pool,
             config: Arc::new(Config::default()),
             cache: Arc::new(AppCache::new()),
+            ws_hub: Arc::new(crate::WsHub::new()),
         }
     }
 
