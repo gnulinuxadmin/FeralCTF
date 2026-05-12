@@ -1,4 +1,6 @@
-use argon2::{Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString};
+use argon2::{
+    Argon2, Params, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::SaltString,
+};
 use jsonwebtoken::{
     Algorithm, DecodingKey, EncodingKey, Header, Validation, crypto::rust_crypto::DEFAULT_PROVIDER,
     decode, encode,

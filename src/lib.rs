@@ -18,11 +18,8 @@ pub mod storage;
 
 pub struct AppState;
 
-pub use cache::{AppCache, ScoreboardState};
+pub use cache::AppCache;
 pub use config::Config;
 pub use database::{Database, DatabaseState, get_db_connection};
 pub use errors::{AppError, ErrorResponse};
-
-// Re-export common types for handlers
-pub use crate::models::scoreboard::Scoreboard;
-pub use crate::models::user::UserData;
+pub use models::scoreboard::ScoreboardState;

@@ -3,9 +3,7 @@
 
 use crate::database::DatabaseState;
 use crate::errors::HandlerResult;
-use crate::models::scoreboard::{
-    LeaderboardEntry, PointBreakdown, ScoreboardEntry, TeamComparison, TeamStats,
-};
+use crate::models::scoreboard::ScoreboardState;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -26,44 +24,14 @@ impl<T: Serialize> IntoResponse for ScoreboardResponse<T> {
 }
 
 pub async fn get_scoreboard(
-    State(db_state): State<DatabaseState>,
-    Query(params): Query<ScoreboardFilters>,
-) -> HandlerResult<ScoreboardResponse<ScoreboardEntry>> {
-    // Placeholder - implement actual query
-    Ok(ScoreboardResponse { entries: vec![] })
-}
-
-pub async fn get_leaderboard(
-    State(db_state): State<DatabaseState>,
-    Query(params): Query<LeaderboardFilters>,
-) -> HandlerResult<ScoreboardResponse<LeaderboardEntry>> {
-    // Placeholder - implement actual query
-    Ok(ScoreboardResponse { entries: vec![] })
-}
-
-pub async fn get_team_stats(
-    State(db_state): State<DatabaseState>,
-    team_name: String,
-) -> HandlerResult<ScoreboardResponse<TeamStats>> {
-    // Placeholder - implement actual query
-    Ok(ScoreboardResponse { entries: vec![] })
-}
-
-pub async fn get_team_comparison(
-    State(db_state): State<DatabaseState>,
-    team_a: String,
-    team_b: String,
-) -> HandlerResult<ScoreboardResponse<TeamComparison>> {
-    // Placeholder - implement actual query
-    Ok(ScoreboardResponse { entries: vec![] })
-}
-
-pub async fn get_point_breakdown(
-    State(db_state): State<DatabaseState>,
-    team_name: String,
-) -> HandlerResult<ScoreboardResponse<PointBreakdown>> {
-    // Placeholder - implement actual query
-    Ok(ScoreboardResponse { entries: vec![] })
+    State(_db_state): State<DatabaseState>,
+    Query(_params): Query<ScoreboardFilters>,
+) -> HandlerResult<Json<ScoreboardState>> {
+    // Placeholder
+    Ok(Json(ScoreboardState {
+        teams: vec![],
+        generated_at: 0,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,10 +41,4 @@ pub struct ScoreboardFilters {
     pub per_page: Option<u64>,
     pub category: Option<String>,
     pub tag: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct LeaderboardFilters {
-    pub top: Option<u64>,
-    pub category: Option<String>,
 }

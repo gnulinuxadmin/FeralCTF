@@ -3,7 +3,7 @@
 
 use crate::database::DatabaseState;
 use crate::errors::HandlerResult;
-use crate::models::challenge::{Challenge, ChallengeStat, ChallengeSubmission};
+use crate::models::challenge::{Challenge, Submission};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -57,7 +57,7 @@ pub async fn get_challenge(
 pub async fn solve_challenge(
     State(db_state): State<DatabaseState>,
     Path(id): Path<i64>,
-    submission: Json<ChallengeSubmission>,
+    submission: Json<Submission>,
 ) -> HandlerResult<String> {
     Ok("Solved!".to_string())
 }
@@ -73,7 +73,7 @@ pub async fn submit_flag(
 pub async fn get_challenge_stats(
     State(db_state): State<DatabaseState>,
     Path(id): Path<i64>,
-) -> HandlerResult<ChallengeResponse<ChallengeStat>> {
+) -> HandlerResult<ChallengeResponse<Challenge>> {
     // Placeholder
     Ok(ChallengeResponse { challenge: None })
 }
