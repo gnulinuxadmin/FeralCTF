@@ -118,6 +118,7 @@ pub struct RateLimitConfig {
     pub submissions_per_minute: u32,
     pub wrong_attempts_before_backoff: u32,
     pub backoff_base_seconds: u64,
+    pub flag_sharing_window_seconds: u64,
 }
 
 impl Default for RateLimitConfig {
@@ -126,6 +127,7 @@ impl Default for RateLimitConfig {
             submissions_per_minute: 10,
             wrong_attempts_before_backoff: 5,
             backoff_base_seconds: 30,
+            flag_sharing_window_seconds: 300,
         }
     }
 }
@@ -246,6 +248,10 @@ fn apply_env_overrides(config: &mut Config) -> Result<(), anyhow::Error> {
         &mut config.rate_limit.backoff_base_seconds,
         "FERALCTF_RATE_LIMIT_BACKOFF_BASE_SECONDS",
     )?;
+    set_from_env(
+        &mut config.rate_limit.flag_sharing_window_seconds,
+        "FERALCTF_RATE_LIMIT_FLAG_SHARING_WINDOW_SECONDS",
+    )?;
 
     set_optional_string_from_env(
         &mut config.notifications.discord_webhook_url,
@@ -304,6 +310,9 @@ fn validate(config: &Config) -> Result<(), anyhow::Error> {
     if config.rate_limit.submissions_per_minute == 0 {
         anyhow::bail!("rate_limit.submissions_per_minute must be greater than 0");
     }
+    if config.rate_limit.flag_sharing_window_seconds == 0 {
+        anyhow::bail!("rate_limit.flag_sharing_window_seconds must be greater than 0");
+    }
     Ok(())
 }
 
@@ -350,6 +359,7 @@ max_file_size_mb = 100
 submissions_per_minute = 10
 wrong_attempts_before_backoff = 5
 backoff_base_seconds = 30
+flag_sharing_window_seconds = 300
 
 [notifications]
 discord_webhook_url = ""

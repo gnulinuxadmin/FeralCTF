@@ -118,5 +118,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_solves_team      ON solves(team_id);
 CREATE INDEX IF NOT EXISTS idx_solves_chal      ON solves(challenge_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_team ON submissions(team_id, challenge_id);
+-- Sprint 11 decision: flag-sharing detection needs to find the same correct
+-- challenge flag submitted by another team inside a short time window.
+CREATE INDEX IF NOT EXISTS idx_submissions_flag_sharing
+    ON submissions(challenge_id, flag, is_correct, submitted_at);
 CREATE INDEX IF NOT EXISTS idx_score_history    ON score_history(team_id, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_token   ON sessions(token_hash);

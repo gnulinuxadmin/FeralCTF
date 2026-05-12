@@ -108,7 +108,9 @@ pub async fn submit_flag(
     let user = current_user(&state, &headers)?;
     let team_id = require_team_id(&user)?;
     let ip = request_ip(&headers);
-    anticheat::check_rate_limit(&state, team_id, &ip)?;
+    state
+        .rate_limiter
+        .check_submission(team_id, id, &state.config.rate_limit)?;
 
     let submitted = request.flag.trim().to_string();
     if submitted.len() > 256 {
@@ -125,6 +127,7 @@ pub async fn submit_flag(
 
     if Challenge::is_solved_by_team(&conn, id, team_id)? {
         Submission::create(&conn, team_id, user.id, id, &submitted, false, Some(&ip))?;
+        state.rate_limiter.record_attempt(team_id, id, false);
         let new_score = team_score(&conn, team_id)?;
         return Ok(Json(SubmitResponse {
             correct: false,
@@ -137,6 +140,7 @@ pub async fn submit_flag(
 
     let correct = verify_submission(&challenge, &submitted)?;
     Submission::create(&conn, team_id, user.id, id, &submitted, correct, Some(&ip))?;
+    state.rate_limiter.record_attempt(team_id, id, correct);
 
     if !correct {
         return Ok(Json(SubmitResponse {
@@ -157,6 +161,13 @@ pub async fn submit_flag(
     let points_earned = current_challenge_points(&conn, id)?;
     let new_score = team_score(&conn, team_id)?;
     insert_score_history(&conn, team_id, new_score, solved_at)?;
+    anticheat::check_flag_sharing(
+        &conn,
+        id,
+        team_id,
+        &submitted,
+        state.config.rate_limit.flag_sharing_window_seconds,
+    )?;
 
     let team_name: String = conn
         .query_row(
@@ -348,6 +359,7 @@ mod tests {
             config: Arc::new(config),
             cache: Arc::new(AppCache::new()),
             ws_hub: Arc::new(crate::WsHub::new()),
+            rate_limiter: Arc::new(anticheat::RateLimiter::new()),
         }
     }
 
@@ -545,6 +557,47 @@ mod tests {
             .unwrap();
         assert_eq!(submissions, 3);
         assert_eq!(solves, 1);
+    }
+
+    #[tokio::test]
+    async fn submit_rate_limited_after_ten_attempts_in_window() {
+        let state = test_state();
+        let (headers, _user, _team) = authed_user(&state);
+
+        for index in 0..10 {
+            let challenge_id =
+                insert_challenge(&state, &format!("static-{index}"), "flag{ok}", "static", 0);
+            let Json(response) = submit_flag(
+                State(state.clone()),
+                headers.clone(),
+                Path(challenge_id),
+                Json(SubmitFlagRequest {
+                    flag: "flag{nope}".to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+            assert!(!response.correct);
+        }
+
+        let challenge_id = insert_challenge(&state, "static-limited", "flag{ok}", "static", 0);
+        let err = submit_flag(
+            State(state),
+            headers,
+            Path(challenge_id),
+            Json(SubmitFlagRequest {
+                flag: "flag{nope}".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        match err {
+            AppError::RateLimited {
+                retry_after_seconds,
+            } => assert!(retry_after_seconds > 0),
+            other => panic!("expected rate limited error, got {other:?}"),
+        }
     }
 
     #[tokio::test]

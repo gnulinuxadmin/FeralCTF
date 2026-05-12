@@ -879,8 +879,8 @@ pub fn export_zip(conn: &DbConn, config: &Config) -> Result<Vec<u8>, AppError> {
     use std::io::Write as _;
 
     let bundle = export(conn, config, false)?;
-    let json = serde_json::to_vec_pretty(&bundle)
-        .map_err(|e| anyhow::anyhow!("json serialize: {e}"))?;
+    let json =
+        serde_json::to_vec_pretty(&bundle).map_err(|e| anyhow::anyhow!("json serialize: {e}"))?;
 
     let buf = Cursor::new(Vec::<u8>::new());
     let mut zip = zip::ZipWriter::new(buf);
@@ -905,7 +905,9 @@ pub fn export_zip(conn: &DbConn, config: &Config) -> Result<Vec<u8>, AppError> {
         }
     }
 
-    let buf = zip.finish().map_err(|e| anyhow::anyhow!("zip finish: {e}"))?;
+    let buf = zip
+        .finish()
+        .map_err(|e| anyhow::anyhow!("zip finish: {e}"))?;
     Ok(buf.into_inner())
 }
 
@@ -935,13 +937,11 @@ pub fn extract_attachments_zip(zip_bytes: &[u8], dest: &Path) -> Result<(), AppE
         }
         let outpath = dest.join(safe_path);
         if let Some(parent) = outpath.parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| anyhow::anyhow!("create dir: {e}"))?;
+            fs::create_dir_all(parent).map_err(|e| anyhow::anyhow!("create dir: {e}"))?;
         }
-        let mut out = fs::File::create(&outpath)
-            .map_err(|e| anyhow::anyhow!("create attachment: {e}"))?;
-        io::copy(&mut file, &mut out)
-            .map_err(|e| anyhow::anyhow!("write attachment: {e}"))?;
+        let mut out =
+            fs::File::create(&outpath).map_err(|e| anyhow::anyhow!("create attachment: {e}"))?;
+        io::copy(&mut file, &mut out).map_err(|e| anyhow::anyhow!("write attachment: {e}"))?;
     }
     Ok(())
 }

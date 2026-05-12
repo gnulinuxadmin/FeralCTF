@@ -24,6 +24,7 @@ pub struct AppState {
     pub config: Arc<config::Config>,
     pub cache: Arc<cache::AppCache>,
     pub ws_hub: Arc<handlers::ws::WsHub>,
+    pub rate_limiter: Arc<anticheat::RateLimiter>,
 }
 
 pub use cache::AppCache;

@@ -17,19 +17,20 @@ Sprints complete:
 - Sprint 8 - WebSocket hub
 - Sprint 9 - Admin console APIs
 - Sprint 10 - Import / Export
+- Sprint 11 - Anti-Cheat + Rate Limiting
 
 Current state file should read:
 
 ```text
-SPRINT 10 DONE
-DONE_COUNT: 11
+SPRINT 11 DONE
+DONE_COUNT: 12
 TOTAL_SPRINTS: 14
-SPRINTS_REMAINING: 3
+SPRINTS_REMAINING: 2
 ```
 
 Next sprint:
 
-- Sprint 11 - Anti-Cheat + Rate Limiting
+- Sprint 12 - Frontend SPA
 
 ## Verified Baseline
 
@@ -44,7 +45,7 @@ cargo clippy --all-targets --all-features
 Last known test count:
 
 ```text
-43 passed
+49 passed
 ```
 
 ## Key Implementation Notes
@@ -70,6 +71,14 @@ Last known test count:
 ```json
 { "error": "..." }
 ```
+
+- Rate-limited responses serialize as:
+
+```json
+{ "error": "rate_limited", "retry_after_seconds": 45 }
+```
+
+- Rate-limited responses also include the `Retry-After` header.
 
 - `src/auth.rs` implements:
   - Argon2id password hashing
@@ -197,6 +206,21 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 
 - Important caveat: the current schema stores static flags only as salted hashes, so existing static flags cannot be exported as plaintext. FeralCTF exports include verifier fields (`flag_hash`, `flag_salt`) to make FeralCTF-to-FeralCTF round-trips lossless. External/plaintext imports still hash flags before storage.
 
+### Sprint 11
+
+- `src/anticheat.rs` implements `RateLimiter`.
+- Submission rate limiting is per team with a 60-second sliding window.
+- Default submission limit is configured by `rate_limit.submissions_per_minute`.
+- Wrong attempts are tracked per `(team_id, challenge_id)`.
+- Exponential backoff starts at `rate_limit.backoff_base_seconds` after `rate_limit.wrong_attempts_before_backoff`.
+- Correct submissions clear the wrong-attempt backoff for that team/challenge.
+- Rate-limited responses return HTTP 429 with a `Retry-After` header and `retry_after_seconds` JSON field.
+- `AppState` owns `Arc<anticheat::RateLimiter>`.
+- `src/main.rs` now starts the Axum server, score snapshot task, and rate limiter GC task.
+- `spawn_rate_limiter_gc_task()` runs every 60 seconds and only cleans in-memory limiter state.
+- `check_flag_sharing()` detects the same correct submitted flag from another team inside `rate_limit.flag_sharing_window_seconds` and logs a warning only.
+- Sprint 11 decision: `migrations/001_initial.sql` includes `idx_submissions_flag_sharing` on `(challenge_id, flag, is_correct, submitted_at)` so flag-sharing detection can use a purpose-built index.
+
 ## Known Cautions
 
 - Do not revive old single-connection database abstractions.
@@ -204,5 +228,6 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - Do not store plaintext flags.
 - Do not expose flag hashes or salts in public responses.
 - Admin export is sensitive; FeralCTF export bundles may contain plaintext regex flags and static flag verifier data.
+- Flag-sharing detection is alert-only; do not auto-disqualify teams from this signal.
 - Do not edit spec files.
 - Do not advance `FERALCTF_SPRINTS.state` until verification passes.

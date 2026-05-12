@@ -1,9 +1,41 @@
+use std::{net::SocketAddr, sync::Arc};
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().map(String::as_str) == Some("import") {
         run_import(&args[1..])?;
+    } else {
+        run_server().await?;
     }
+    Ok(())
+}
+
+async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
+    let config = feralctf::config::load("config.toml")?;
+    let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
+    let pool = feralctf::db::init_pool(&config.database.path)?;
+    {
+        let conn = pool.get()?;
+        feralctf::db::run_migrations(&conn)?;
+    }
+
+    let rate_limiter = Arc::new(feralctf::anticheat::RateLimiter::new());
+    let state = feralctf::AppState {
+        db: pool,
+        config: Arc::new(config),
+        cache: Arc::new(feralctf::AppCache::new()),
+        ws_hub: Arc::new(feralctf::WsHub::new()),
+        rate_limiter: Arc::clone(&rate_limiter),
+    };
+
+    let _score_snapshots = feralctf::handlers::scoreboard::spawn_score_snapshot_task(state.clone());
+    let _rate_limit_gc = feralctf::anticheat::spawn_rate_limiter_gc_task(rate_limiter);
+
+    let router = feralctf::routes::create_router(state);
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    tracing::info!(%addr, "feralctf listening");
+    axum::serve(listener, router).await?;
     Ok(())
 }
 

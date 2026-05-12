@@ -552,10 +552,9 @@ pub async fn import_bundle(
                 file_bytes = Some(bytes.to_vec());
             }
             "attachments" => {
-                let bytes = field
-                    .bytes()
-                    .await
-                    .map_err(|err| AppError::BadRequest(format!("invalid attachments zip: {err}")))?;
+                let bytes = field.bytes().await.map_err(|err| {
+                    AppError::BadRequest(format!("invalid attachments zip: {err}"))
+                })?;
                 attachment_zip = Some(bytes.to_vec());
             }
             "overwrite" => {
@@ -582,10 +581,8 @@ pub async fn import_bundle(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let options = ImportOptions { overwrite, dry_run };
     let attachments_dir = std::path::Path::new(&state.config.storage.attachments_path);
-    if !dry_run {
-        if let Some(zip_bytes) = attachment_zip {
-            import_export::extract_attachments_zip(&zip_bytes, attachments_dir)?;
-        }
+    if !dry_run && let Some(zip_bytes) = attachment_zip {
+        import_export::extract_attachments_zip(&zip_bytes, attachments_dir)?;
     }
     let result = import_export::import(&conn, &bundle, Some(attachments_dir), &options)?;
     if !options.dry_run && result.valid {
@@ -701,6 +698,7 @@ mod tests {
             config: Arc::new(config),
             cache: Arc::new(AppCache::new()),
             ws_hub: Arc::new(WsHub::new()),
+            rate_limiter: Arc::new(crate::anticheat::RateLimiter::new()),
         }
     }
 

@@ -257,6 +257,7 @@ mod tests {
             config: Arc::new(Config::default()),
             cache: Arc::new(AppCache::new()),
             ws_hub: Arc::new(crate::WsHub::new()),
+            rate_limiter: Arc::new(crate::anticheat::RateLimiter::new()),
         }
     }
 

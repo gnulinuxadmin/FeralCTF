@@ -14,16 +14,17 @@ For the complete technical design, schema, API details, security model, and road
 
 FeralCTF is under active development.
 
-The backend foundation is now in place through admin import/export support. Anti-cheat/rate limiting is the current area of work.
+The backend foundation is now in place through anti-cheat and rate limiting.
 
 Status summary:
 
 - Core backend foundations are implemented.
 - Player authentication, teams, challenges, scoring, scoreboard, live event plumbing, and admin controls are in place.
 - Challenge import/export is implemented, including dry-run import and CTFd detection.
+- Submission rate limiting, exponential wrong-attempt backoff, and flag-sharing detection are implemented.
 - The codebase is regularly checked with `cargo check`, `cargo test`, and `cargo clippy --all-targets --all-features`.
 
-The HTTP server startup, anti-cheat/rate limiting, frontend SPA, release hardening, and final single-binary packaging are still upcoming.
+The frontend SPA, release hardening, and final single-binary packaging are still upcoming.
 
 ## Architecture Overview
 
@@ -42,6 +43,7 @@ At a high level:
 - **Argon2id** protects passwords.
 - **Salted SHA-256 flag hashes** protect static challenge flags.
 - **WebSocket broadcast channel** publishes live public events such as solves and scoreboard updates.
+- **In-process anti-cheat state** enforces submission rate limits and wrong-attempt backoff.
 - **Vanilla JavaScript/CSS frontend** is planned to be embedded into the final binary.
 
 The intended runtime model is:
@@ -110,6 +112,10 @@ The following pieces are implemented:
 - Challenge bundle import with dry-run and overwrite modes, including attachment ZIP upload
 - CTFd JSON/ZIP import detection and conversion
 - CLI challenge import command
+- HTTP server startup via `cargo run`
+- Submission rate limiting with HTTP 429 and `Retry-After`
+- Exponential backoff for repeated wrong flag submissions
+- Flag-sharing detection with indexed submission lookup and warning-only alerts
 
 ## How The Finished Application Will Work
 
@@ -124,6 +130,7 @@ Typical organizer flow:
 5. Create or import challenges, hints, files, and scoring settings.
 6. Open registration for players or teams.
 7. Monitor submissions, scoreboard movement, announcements, and competition state from the admin interface.
+8. Review anti-cheat warning signals such as possible flag sharing.
 
 Typical player flow:
 
@@ -183,18 +190,10 @@ Operational expectations:
 - Back up the SQLite database before and after major event milestones.
 - Keep `config.toml` and exports containing plaintext flags private.
 - Existing static flags are stored as salted hashes and cannot be recovered as plaintext; FeralCTF exports include verifier data so FeralCTF-to-FeralCTF round-trips remain lossless.
+- Rate-limited clients receive HTTP 429 with a `Retry-After` header.
 - Use a strong `auth.jwt_secret`.
 - Store attachments outside any public webroot.
 - Put production instances behind HTTPS.
-
-## In Progress
-
-Current focus:
-
-- Anti-cheat and rate limiting
-- Submission sliding-window limits
-- Exponential backoff for repeated wrong submissions
-- Flag-sharing detection
 
 ## Upcoming Features
 
@@ -287,8 +286,6 @@ Run the current binary:
 cargo run
 ```
 
-Note: full server startup is still being wired as part of the remaining implementation work, so `cargo run` may not yet launch the final application experience.
-
 ## Configuration
 
 Configuration is loaded from defaults, optional TOML, and environment variables.
@@ -317,7 +314,7 @@ src/
   models/                 # database-backed domain models
   routes.rs               # Axum route wiring
   scoring.rs              # dynamic scoring and score recalculation
-  anticheat.rs            # anti-cheat/rate-limit hooks
+  anticheat.rs            # anti-cheat and rate limiting
 frontend/                 # planned vanilla JS frontend
 migrations/               # SQLite migrations
 FERALCTF_SPEC.md          # full technical specification
@@ -330,7 +327,9 @@ FERALCTF_SPEC.md          # full technical specification
 - Public challenge responses must never expose flag hashes or salts.
 - JWTs are backed by server-side session revocation.
 - Every flag submission is recorded for auditability.
-- Full anti-cheat and rate limiting are planned upcoming work.
+- Submission rate limiting is enforced per team.
+- Repeated wrong submissions trigger exponential backoff.
+- Flag-sharing detection is warning-only; it does not auto-disqualify teams.
 
 ## License
 
