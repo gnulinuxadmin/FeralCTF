@@ -1,15 +1,15 @@
 // FeralCTF - Challenge handler module
 // Implements FERALCTF_SPEC.md section 7.1
 
-use axum::{
-    extract::{Path, Query, State},
-    response::{IntoResponse, Json},
-    http::StatusCode,
-};
-use serde::{Deserialize, Serialize};
 use crate::database::DatabaseState;
 use crate::errors::HandlerResult;
-use crate::models::challenge::{Challenge, ChallengeSubmission, ChallengeStat};
+use crate::models::challenge::{Challenge, ChallengeStat, ChallengeSubmission};
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Json},
+};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ChallengeResponse<T> {
@@ -38,7 +38,7 @@ impl<T: Serialize> IntoResponse for ChallengeListResponse<T> {
 
 pub async fn list_challenges(
     State(db_state): State<DatabaseState>,
-    Query(params): Query<ChallengeFilters>
+    Query(params): Query<ChallengeFilters>,
 ) -> HandlerResult<ChallengeListResponse<Challenge>> {
     // Placeholder - implement actual query
     let challenges = vec![];
@@ -57,7 +57,7 @@ pub async fn get_challenge(
 pub async fn solve_challenge(
     State(db_state): State<DatabaseState>,
     Path(id): Path<i64>,
-    submission: Json<ChallengeSubmission>
+    submission: Json<ChallengeSubmission>,
 ) -> HandlerResult<String> {
     Ok("Solved!".to_string())
 }
@@ -65,7 +65,7 @@ pub async fn solve_challenge(
 pub async fn submit_flag(
     State(db_state): State<DatabaseState>,
     Path(id): Path<i64>,
-    flag: String
+    flag: String,
 ) -> HandlerResult<String> {
     Ok("Flag verified".to_string())
 }

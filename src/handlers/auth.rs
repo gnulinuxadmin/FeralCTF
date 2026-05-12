@@ -1,14 +1,14 @@
 // FeralCTF - Authentication handler module
 // Implements FERALCTF_SPEC.md section 7.2
 
-use axum::{
-    extract::State,
-    response::{IntoResponse, Json},
-    http::StatusCode,
-};
-use serde::{Deserialize, Serialize};
 use crate::database::DatabaseState;
 use crate::errors::HandlerResult;
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Json},
+};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginRequest {
@@ -35,7 +35,10 @@ impl IntoResponse for LoginResponse {
     }
 }
 
-pub async fn login(State(db_state): State<DatabaseState>, credentials: Json<LoginRequest>) -> HandlerResult<LoginResponse> {
+pub async fn login(
+    State(db_state): State<DatabaseState>,
+    credentials: Json<LoginRequest>,
+) -> HandlerResult<LoginResponse> {
     // Placeholder - implement actual auth logic
     Ok(LoginResponse {
         token: "placeholder_token".to_string(),
@@ -46,7 +49,10 @@ pub async fn login(State(db_state): State<DatabaseState>, credentials: Json<Logi
     })
 }
 
-pub async fn register(State(db_state): State<DatabaseState>, data: Json<RegisterRequest>) -> HandlerResult<String> {
+pub async fn register(
+    State(db_state): State<DatabaseState>,
+    data: Json<RegisterRequest>,
+) -> HandlerResult<String> {
     Ok("Registration successful".to_string())
 }
 

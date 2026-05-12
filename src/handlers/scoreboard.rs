@@ -1,15 +1,17 @@
 // FeralCTF - Scoreboard handler module
 // Implements FERALCTF_SPEC.md section 7.5
 
-use axum::{
-    extract::{Query, State},
-    response::{IntoResponse, Json},
-    http::StatusCode,
-};
-use serde::{Deserialize, Serialize};
 use crate::database::DatabaseState;
 use crate::errors::HandlerResult;
-use crate::models::scoreboard::{ScoreboardEntry, LeaderboardEntry, PointBreakdown, TeamComparison, TeamStats};
+use crate::models::scoreboard::{
+    LeaderboardEntry, PointBreakdown, ScoreboardEntry, TeamComparison, TeamStats,
+};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    response::{IntoResponse, Json},
+};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScoreboardResponse<T> {
@@ -25,7 +27,7 @@ impl<T: Serialize> IntoResponse for ScoreboardResponse<T> {
 
 pub async fn get_scoreboard(
     State(db_state): State<DatabaseState>,
-    Query(params): Query<ScoreboardFilters>
+    Query(params): Query<ScoreboardFilters>,
 ) -> HandlerResult<ScoreboardResponse<ScoreboardEntry>> {
     // Placeholder - implement actual query
     Ok(ScoreboardResponse { entries: vec![] })
@@ -33,7 +35,7 @@ pub async fn get_scoreboard(
 
 pub async fn get_leaderboard(
     State(db_state): State<DatabaseState>,
-    Query(params): Query<LeaderboardFilters>
+    Query(params): Query<LeaderboardFilters>,
 ) -> HandlerResult<ScoreboardResponse<LeaderboardEntry>> {
     // Placeholder - implement actual query
     Ok(ScoreboardResponse { entries: vec![] })

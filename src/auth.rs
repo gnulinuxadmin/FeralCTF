@@ -28,8 +28,8 @@ impl Auth {
 
     pub fn verify_token(&self, token: &str) -> Option<i64> {
         // Stub implementation
-        if token.starts_with("token_") {
-            token[6..].parse().ok()
+        if let Some(stripped) = token.strip_prefix("token_") {
+            stripped.parse().ok()
         } else {
             None
         }
@@ -38,5 +38,11 @@ impl Auth {
     pub fn is_admin(&self, user_id: i64) -> bool {
         // Stub implementation
         false
+    }
+}
+
+impl Default for Auth {
+    fn default() -> Self {
+        Self::new()
     }
 }

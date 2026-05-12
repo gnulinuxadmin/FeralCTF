@@ -11,12 +11,22 @@ impl Scoring {
         Self {}
     }
 
-    pub fn calculate_score(&self, challenge_points: i64, time_taken: u64, is_first_solve: bool) -> i64 {
+    pub fn calculate_score(
+        &self,
+        challenge_points: i64,
+        time_taken: u64,
+        is_first_solve: bool,
+    ) -> i64 {
         // Stub implementation
         challenge_points
     }
 
-    pub fn calculate_dynamic_score(&self, base_points: i64, solves_count: u64, max_solves: u64) -> i64 {
+    pub fn calculate_dynamic_score(
+        &self,
+        base_points: i64,
+        solves_count: u64,
+        max_solves: u64,
+    ) -> i64 {
         // Stub implementation
         base_points
     }
@@ -29,5 +39,11 @@ impl Scoring {
     pub fn get_team_score(&self, team_id: i64) -> Result<i64, anyhow::Error> {
         // Stub implementation
         Ok(0)
+    }
+}
+
+impl Default for Scoring {
+    fn default() -> Self {
+        Self::new()
     }
 }

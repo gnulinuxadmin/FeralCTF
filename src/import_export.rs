@@ -41,3 +41,9 @@ impl ImportExport {
         Ok(())
     }
 }
+
+impl Default for ImportExport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
