@@ -2,9 +2,9 @@
 // Implements FERALCTF_SPEC.md section 5.2
 
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 
@@ -13,22 +13,22 @@ use serde::Serialize;
 pub enum AppError {
     /// Database error
     Database(String),
-    
+
     /// Authentication error
     Authentication(String),
-    
+
     /// Validation error
     Validation(String),
-    
+
     /// Not found error
     NotFound(String),
-    
+
     /// Internal server error
     Internal(String),
-    
+
     /// Custom error with status code
     Custom(StatusCode, String),
-    
+
     /// Handler error for API routes
     Handler(String),
 }
@@ -43,7 +43,8 @@ impl IntoResponse for AppError {
                     error: "Database error".to_string(),
                     message: msg,
                 }),
-            ).into_response(),
+            )
+                .into_response(),
             Self::Authentication(msg) => (
                 StatusCode::UNAUTHORIZED,
                 Json(ErrorResponse {
@@ -51,7 +52,8 @@ impl IntoResponse for AppError {
                     error: "Authentication error".to_string(),
                     message: msg,
                 }),
-            ).into_response(),
+            )
+                .into_response(),
             Self::Validation(msg) => (
                 StatusCode::BAD_REQUEST,
                 Json(ErrorResponse {
@@ -59,7 +61,8 @@ impl IntoResponse for AppError {
                     error: "Validation error".to_string(),
                     message: msg,
                 }),
-            ).into_response(),
+            )
+                .into_response(),
             Self::NotFound(msg) => (
                 StatusCode::NOT_FOUND,
                 Json(ErrorResponse {
@@ -67,7 +70,8 @@ impl IntoResponse for AppError {
                     error: "Not found".to_string(),
                     message: msg,
                 }),
-            ).into_response(),
+            )
+                .into_response(),
             Self::Internal(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
@@ -75,7 +79,8 @@ impl IntoResponse for AppError {
                     error: "Internal error".to_string(),
                     message: msg,
                 }),
-            ).into_response(),
+            )
+                .into_response(),
             Self::Custom(status, msg) => (
                 status,
                 Json(ErrorResponse {
@@ -83,7 +88,8 @@ impl IntoResponse for AppError {
                     error: "Custom error".to_string(),
                     message: msg,
                 }),
-            ).into_response(),
+            )
+                .into_response(),
             Self::Handler(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
@@ -91,7 +97,8 @@ impl IntoResponse for AppError {
                     error: "Handler error".to_string(),
                     message: msg,
                 }),
-            ).into_response(),
+            )
+                .into_response(),
         }
     }
 }
@@ -109,7 +116,8 @@ impl IntoResponse for ErrorResponse {
         (
             StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             Json(self),
-        ).into_response()
+        )
+            .into_response()
     }
 }
 
@@ -122,10 +130,7 @@ pub struct ValidationError {
 
 impl IntoResponse for ValidationError {
     fn into_response(self) -> Response {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(self),
-        ).into_response()
+        (StatusCode::BAD_REQUEST, Json(self)).into_response()
     }
 }
 

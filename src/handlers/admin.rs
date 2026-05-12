@@ -1,13 +1,13 @@
 // FeralCTF - Admin handler module
 // Implements FERALCTF_SPEC.md section 7.3
 
+use crate::database::DatabaseState;
+use crate::errors::HandlerResult;
 use axum::{
     extract::State,
     response::{IntoResponse, Json},
 };
 use serde::{Deserialize, Serialize};
-use crate::database::DatabaseState;
-use crate::errors::HandlerResult;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AdminResponse<T> {
@@ -42,11 +42,18 @@ pub async fn purge_old_solves(State(_db_state): State<DatabaseState>) -> Handler
     Ok("Purge old solves".to_string())
 }
 
-pub async fn update_challenge(State(_db_state): State<DatabaseState>, challenge_id: i64, data: Json<ChallengeUpdate>) -> HandlerResult<String> {
+pub async fn update_challenge(
+    State(_db_state): State<DatabaseState>,
+    challenge_id: i64,
+    data: Json<ChallengeUpdate>,
+) -> HandlerResult<String> {
     Ok("Challenge updated".to_string())
 }
 
-pub async fn ban_user(State(_db_state): State<DatabaseState>, username: &str) -> HandlerResult<String> {
+pub async fn ban_user(
+    State(_db_state): State<DatabaseState>,
+    username: &str,
+) -> HandlerResult<String> {
     Ok("User banned".to_string())
 }
 

@@ -1,8 +1,8 @@
 // FeralCTF - Team Model
 // Implements FERALCTF_SPEC.md section 2
 
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Team {

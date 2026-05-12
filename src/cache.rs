@@ -32,7 +32,7 @@ impl Cache {
             .unwrap()
             .as_secs()
             + ttl_seconds;
-        
+
         self.data.insert(key, CacheEntry { value, expires_at });
     }
 
@@ -45,7 +45,13 @@ impl Cache {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         self.data.retain(|_, entry| entry.expires_at > now);
+    }
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self::new()
     }
 }

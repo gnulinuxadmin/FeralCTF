@@ -11,7 +11,12 @@ impl AntiCheat {
         Self {}
     }
 
-    pub fn check_challenge_attempt(&self, _user_id: i64, _challenge_id: i64, _attempt_time: u64) -> bool {
+    pub fn check_challenge_attempt(
+        &self,
+        _user_id: i64,
+        _challenge_id: i64,
+        _attempt_time: u64,
+    ) -> bool {
         // Stub implementation - parameters reserved for future implementation
         true
     }
@@ -28,5 +33,11 @@ impl AntiCheat {
     pub fn is_banned(&self, _user_id: i64) -> bool {
         // Stub implementation - parameters reserved for future implementation
         false
+    }
+}
+
+impl Default for AntiCheat {
+    fn default() -> Self {
+        Self::new()
     }
 }
