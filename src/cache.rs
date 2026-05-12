@@ -160,6 +160,14 @@ impl AppCache {
         let challenges = self.challenges.read().unwrap();
         challenges.clone()
     }
+
+    /// Placeholder invalidation hook used by Sprint 6. Sprint 7 replaces this
+    /// with a canonical scoreboard cache.
+    pub fn invalidate_scoreboard(&self) {
+        if let Ok(mut scoreboard) = self.scoreboard.write() {
+            *scoreboard = ScoreboardState::default();
+        }
+    }
 }
 
 #[cfg(test)]

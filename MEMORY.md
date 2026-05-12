@@ -11,19 +11,21 @@ Sprints complete:
 - Sprint 2 - Config loading
 - Sprint 3 - Auth crypto
 - Sprint 4 - Models
+- Sprint 5 - Auth handlers
+- Sprint 6 - Challenge handlers + flag submission
 
 Current state file should read:
 
 ```text
-SPRINT 4 DONE
-DONE_COUNT: 5
+SPRINT 6 DONE
+DONE_COUNT: 7
 TOTAL_SPRINTS: 14
-SPRINTS_REMAINING: 9
+SPRINTS_REMAINING: 7
 ```
 
 Next sprint:
 
-- Sprint 5 - Auth Handlers
+- Sprint 7 - Scoreboard + Cache
 
 ## Verified Baseline
 
@@ -38,7 +40,7 @@ cargo clippy --all-targets --all-features
 Last known test count:
 
 ```text
-14 passed
+26 passed
 ```
 
 ## Key Implementation Notes
@@ -126,6 +128,17 @@ Important Sprint 5 details:
 - Logout must revoke DB session.
 - `/me` must verify JWT and session validity.
 - Handlers should return `Result<Json<T>, AppError>`.
+
+### Sprint 6
+
+- `src/handlers/challenges.rs` implements challenge list/detail, flag submit, and hint unlock.
+- Static flags use salted hash verification via `auth::verify_flag`.
+- Regex flags are supported with the `regex` crate; the regex pattern is read from `challenge.flag_hash`.
+- Every flag submission is recorded in `submissions`.
+- Correct submissions insert `solves`, recalculate scores, invalidate the cache stub, and insert `score_history`.
+- Already-solved submissions return `correct: false` with message `"already solved"`.
+- `src/scoring.rs` implements `dynamic_points`, `recalculate_challenge_points`, and full team-score recalculation from solves minus hint deductions.
+- `src/anticheat.rs` has the Sprint 6 `check_rate_limit` hook; full enforcement remains Sprint 11.
 
 ## Known Cautions
 

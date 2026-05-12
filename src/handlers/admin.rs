@@ -50,10 +50,7 @@ pub async fn update_challenge(
     Ok("Challenge updated".to_string())
 }
 
-pub async fn ban_user(
-    State(_db_state): State<AppState>,
-    username: &str,
-) -> HandlerResult<String> {
+pub async fn ban_user(State(_db_state): State<AppState>, username: &str) -> HandlerResult<String> {
     Ok("User banned".to_string())
 }
 

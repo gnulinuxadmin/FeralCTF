@@ -6,6 +6,14 @@ pub struct AntiCheat {
     // Stub implementation
 }
 
+pub fn check_rate_limit(
+    _state: &crate::AppState,
+    _team_id: i64,
+    _ip: &str,
+) -> Result<(), crate::errors::AppError> {
+    Ok(())
+}
+
 impl AntiCheat {
     pub fn new() -> Self {
         Self {}

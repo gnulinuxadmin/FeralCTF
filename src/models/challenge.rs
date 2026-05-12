@@ -39,7 +39,7 @@ pub struct ChallengePublic {
     pub unlock_requires: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hint {
     pub id: i64,
     pub challenge_id: i64,
@@ -48,7 +48,7 @@ pub struct Hint {
     pub sort_order: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChallengeFile {
     pub id: i64,
     pub challenge_id: i64,
@@ -58,7 +58,7 @@ pub struct ChallengeFile {
     pub sha256: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Submission {
     pub id: i64,
     pub team_id: i64,
@@ -68,6 +68,15 @@ pub struct Submission {
     pub is_correct: bool,
     pub ip_address: Option<String>,
     pub submitted_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HintPublic {
+    pub id: i64,
+    pub cost_points: i64,
+    pub sort_order: i64,
+    pub unlocked: bool,
+    pub content: Option<String>,
 }
 
 const SELECT_BY_ID: &str =
@@ -151,6 +160,41 @@ impl Challenge {
         Ok(n > 0)
     }
 
+    pub fn file_count(conn: &DbConn, challenge_id: i64) -> Result<i64, AppError> {
+        let n = conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE challenge_id = ?1",
+            rusqlite::params![challenge_id],
+            |row| row.get(0),
+        )?;
+        Ok(n)
+    }
+
+    pub fn hint_count(conn: &DbConn, challenge_id: i64) -> Result<i64, AppError> {
+        let n = conn.query_row(
+            "SELECT COUNT(*) FROM hints WHERE challenge_id = ?1",
+            rusqlite::params![challenge_id],
+            |row| row.get(0),
+        )?;
+        Ok(n)
+    }
+
+    pub fn to_public(&self, conn: &DbConn, team_id: i64) -> Result<ChallengePublic, AppError> {
+        Ok(ChallengePublic {
+            id: self.id,
+            slug: self.slug.clone(),
+            title: self.title.clone(),
+            description: self.description.clone(),
+            category: self.category.clone(),
+            points: self.points,
+            solve_count: Self::solve_count(conn, self.id)?,
+            solved_by_team: Self::is_solved_by_team(conn, self.id, team_id)?,
+            tags: parse_tags(self.tags.as_deref()),
+            file_count: Self::file_count(conn, self.id)?,
+            hint_count: Self::hint_count(conn, self.id)?,
+            unlock_requires: self.unlock_requires,
+        })
+    }
+
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Challenge {
             id: row.get(0)?,
@@ -173,6 +217,177 @@ impl Challenge {
             created_at: row.get(17)?,
         })
     }
+}
+
+impl Hint {
+    pub fn find_by_id(conn: &DbConn, id: i64) -> Result<Option<Self>, AppError> {
+        let result = conn.query_row(
+            "SELECT id, challenge_id, content, cost_points, sort_order FROM hints WHERE id = ?1",
+            rusqlite::params![id],
+            Self::from_row,
+        );
+        match result {
+            Ok(hint) => Ok(Some(hint)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(AppError::Database(err)),
+        }
+    }
+
+    pub fn list_public_for_team(
+        conn: &DbConn,
+        challenge_id: i64,
+        team_id: i64,
+    ) -> Result<Vec<HintPublic>, AppError> {
+        let mut stmt = conn.prepare(
+            "SELECT h.id, h.content, h.cost_points, h.sort_order,
+                    hu.id IS NOT NULL AS unlocked
+             FROM hints h
+             LEFT JOIN hint_unlocks hu ON hu.hint_id = h.id AND hu.team_id = ?2
+             WHERE h.challenge_id = ?1
+             ORDER BY h.sort_order, h.id",
+        )?;
+        let hints = stmt
+            .query_map(rusqlite::params![challenge_id, team_id], |row| {
+                let unlocked = row.get::<_, i64>(4)? != 0;
+                Ok(HintPublic {
+                    id: row.get(0)?,
+                    cost_points: row.get(2)?,
+                    sort_order: row.get(3)?,
+                    unlocked,
+                    content: if unlocked { Some(row.get(1)?) } else { None },
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(hints)
+    }
+
+    pub fn is_unlocked(conn: &DbConn, team_id: i64, hint_id: i64) -> Result<bool, AppError> {
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM hint_unlocks WHERE team_id = ?1 AND hint_id = ?2",
+            rusqlite::params![team_id, hint_id],
+            |row| row.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    pub fn unlock(
+        conn: &DbConn,
+        team_id: i64,
+        hint_id: i64,
+        points_deducted: i64,
+        unlocked_at: i64,
+    ) -> Result<(), AppError> {
+        conn.execute(
+            "INSERT INTO hint_unlocks (team_id, hint_id, points_deducted, unlocked_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![team_id, hint_id, points_deducted, unlocked_at],
+        )?;
+        Ok(())
+    }
+
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Hint {
+            id: row.get(0)?,
+            challenge_id: row.get(1)?,
+            content: row.get(2)?,
+            cost_points: row.get(3)?,
+            sort_order: row.get(4)?,
+        })
+    }
+}
+
+impl ChallengeFile {
+    pub fn list_by_challenge(conn: &DbConn, challenge_id: i64) -> Result<Vec<Self>, AppError> {
+        let mut stmt = conn.prepare(
+            "SELECT id, challenge_id, filename, storage_path, size_bytes, sha256
+             FROM files WHERE challenge_id = ?1 ORDER BY filename",
+        )?;
+        let files = stmt
+            .query_map(rusqlite::params![challenge_id], |row| {
+                Ok(ChallengeFile {
+                    id: row.get(0)?,
+                    challenge_id: row.get(1)?,
+                    filename: row.get(2)?,
+                    storage_path: row.get(3)?,
+                    size_bytes: row.get(4)?,
+                    sha256: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(files)
+    }
+}
+
+impl Submission {
+    pub fn create(
+        conn: &DbConn,
+        team_id: i64,
+        user_id: i64,
+        challenge_id: i64,
+        flag: &str,
+        is_correct: bool,
+        ip_address: Option<&str>,
+    ) -> Result<Self, AppError> {
+        let submitted_at = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT INTO submissions
+                (team_id, user_id, challenge_id, flag, is_correct, ip_address, submitted_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                team_id,
+                user_id,
+                challenge_id,
+                flag,
+                if is_correct { 1 } else { 0 },
+                ip_address,
+                submitted_at
+            ],
+        )?;
+        Ok(Submission {
+            id: conn.last_insert_rowid(),
+            team_id,
+            user_id,
+            challenge_id,
+            flag: flag.to_string(),
+            is_correct,
+            ip_address: ip_address.map(ToString::to_string),
+            submitted_at,
+        })
+    }
+}
+
+pub fn insert_solve(
+    conn: &DbConn,
+    team_id: i64,
+    user_id: i64,
+    challenge_id: i64,
+    solved_at: i64,
+) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT INTO solves (team_id, user_id, challenge_id, solved_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![team_id, user_id, challenge_id, solved_at],
+    )?;
+    Ok(())
+}
+
+pub fn insert_score_history(
+    conn: &DbConn,
+    team_id: i64,
+    score: i64,
+    recorded_at: i64,
+) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT INTO score_history (team_id, score, recorded_at)
+         VALUES (?1, ?2, ?3)",
+        rusqlite::params![team_id, score, recorded_at],
+    )?;
+    Ok(())
+}
+
+fn parse_tags(tags: Option<&str>) -> Vec<String> {
+    tags.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

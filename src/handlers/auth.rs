@@ -37,10 +37,15 @@ fn extract_bearer(headers: &HeaderMap) -> Result<&str, AppError> {
 
 fn validate_username(username: &str) -> Result<(), AppError> {
     let n = username.len();
-    if n < 3 || n > 32 {
-        return Err(AppError::BadRequest("username must be 3–32 characters".into()));
+    if !(3..=32).contains(&n) {
+        return Err(AppError::BadRequest(
+            "username must be 3–32 characters".into(),
+        ));
     }
-    if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !username
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return Err(AppError::BadRequest(
             "username may only contain letters, digits, _ and -".into(),
         ));
@@ -80,7 +85,10 @@ pub async fn register(
         ));
     }
 
-    let conn = state.db.get().map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     if User::find_by_username(&conn, &req.username)?.is_some() {
         return Err(AppError::BadRequest("username already taken".into()));
@@ -132,7 +140,10 @@ pub async fn login(
     State(state): State<AppState>,
     Json(req): Json<LoginRequest>,
 ) -> HandlerResult<Json<LoginResponse>> {
-    let conn = state.db.get().map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
 
     let user = User::find_by_username(&conn, &req.username)?.ok_or(AppError::Unauthorized)?;
 
@@ -157,10 +168,7 @@ pub async fn login(
     }))
 }
 
-pub async fn logout(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> HandlerResult<Json<()>> {
+pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> HandlerResult<Json<()>> {
     let token = extract_bearer(&headers)?;
     let token_hash = auth::hash_token(token);
     auth::revoke_session(&state.db, &token_hash)?;
@@ -178,7 +186,10 @@ pub async fn me(
         return Err(AppError::Unauthorized);
     }
 
-    let conn = state.db.get().map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let user = User::find_by_id(&conn, claims.sub)?.ok_or(AppError::Unauthorized)?;
 
     Ok(Json(UserPublic {
@@ -207,7 +218,10 @@ pub async fn change_password(
         ));
     }
 
-    let conn = state.db.get().map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let user = User::find_by_id(&conn, claims.sub)?.ok_or(AppError::Unauthorized)?;
 
     if !auth::verify_password(&req.current_password, &user.password_hash)? {

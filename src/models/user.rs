@@ -71,7 +71,11 @@ impl User {
         }
     }
 
-    pub fn create(conn: &DbConn, req: &RegisterRequest, password_hash: &str) -> Result<Self, AppError> {
+    pub fn create(
+        conn: &DbConn,
+        req: &RegisterRequest,
+        password_hash: &str,
+    ) -> Result<Self, AppError> {
         let now = chrono::Utc::now().timestamp();
         conn.execute(
             "INSERT INTO users (username, email, password_hash, role, team_id, created_at)

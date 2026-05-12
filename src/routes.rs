@@ -1,12 +1,12 @@
-use axum::{
-    routing::{get, post, put},
-    Router,
-};
 use crate::AppState;
-use crate::handlers::auth::{register, login, logout, me, change_password};
-use crate::handlers::challenges::{list_challenges, get_challenge, solve_challenge};
+use crate::handlers::admin::{dashboard, get_teams, get_users};
+use crate::handlers::auth::{change_password, login, logout, me, register};
+use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
 use crate::handlers::scoreboard::get_scoreboard;
-use crate::handlers::admin::{dashboard, get_users, get_teams};
+use axum::{
+    Router,
+    routing::{get, post, put},
+};
 
 pub fn create_router() -> Router<AppState> {
     Router::new()
@@ -18,8 +18,12 @@ pub fn create_router() -> Router<AppState> {
         .route("/api/auth/password", put(change_password))
         // Challenge routes
         .route("/api/challenges", get(list_challenges))
-        .route("/api/challenges/:id", get(get_challenge))
-        .route("/api/challenges/:id/submit", post(solve_challenge))
+        .route("/api/challenges/{id}", get(get_challenge))
+        .route("/api/challenges/{id}/submit", post(submit_flag))
+        .route(
+            "/api/challenges/{challenge_id}/hints/{hint_id}/unlock",
+            post(unlock_hint),
+        )
         // Scoreboard routes
         .route("/api/scoreboard", get(get_scoreboard))
         // Admin routes
