@@ -2,7 +2,9 @@ use crate::AppState;
 use crate::handlers::admin::{dashboard, get_teams, get_users};
 use crate::handlers::auth::{change_password, login, logout, me, register};
 use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
-use crate::handlers::scoreboard::get_scoreboard;
+use crate::handlers::scoreboard::{
+    create_team, get_scoreboard, get_scoreboard_graph, get_team_profile, join_team,
+};
 use axum::{
     Router,
     routing::{get, post, put},
@@ -26,6 +28,10 @@ pub fn create_router() -> Router<AppState> {
         )
         // Scoreboard routes
         .route("/api/scoreboard", get(get_scoreboard))
+        .route("/api/scoreboard/graph", get(get_scoreboard_graph))
+        .route("/api/teams/{id}", get(get_team_profile))
+        .route("/api/teams", post(create_team))
+        .route("/api/teams/join", post(join_team))
         // Admin routes
         .route("/api/admin", get(dashboard))
         .route("/api/admin/users", get(get_users))

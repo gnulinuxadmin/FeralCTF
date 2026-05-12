@@ -1,94 +1,17 @@
-//! Cache module for in-memory state management
-//!
-//! Provides session management, token revocation, and cached state operations.
-
-use chrono::{DateTime, Utc};
 use dashmap::DashMap;
-use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
-use crate::errors::AppError;
+use crate::{
+    db::DbConn,
+    errors::AppError,
+    models::{challenge::Challenge, scoreboard::ScoreboardState},
+};
 
-/// In-memory scoreboard cache (for rate limiting, etc.)
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct ScoreboardState {
-    pub challenges: Vec<ChallengeInfo>,
-    pub submissions: Vec<SubmissionInfo>,
-    pub flags: Vec<FlagInfo>,
-    pub solved_count: u32,
-    pub total_score: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChallengeInfo {
-    pub id: i32,
-    pub title: String,
-    pub category: String,
-    pub points: u32,
-    pub solved: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubmissionInfo {
-    pub team_name: String,
-    pub challenge_id: i32,
-    pub solved_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FlagInfo {
-    pub challenge_id: i32,
-    submitted_by: String,
-    pub score: u32,
-}
-
-/// Websocket hub for real-time notifications (placeholder)
-pub struct WsHub {
-    pub sender: tokio::sync::broadcast::Sender<Vec<String>>,
-    pub subscribers: usize,
-}
-
-impl WsHub {
-    pub fn new() -> Self {
-        let (sender, _receiver) = tokio::sync::broadcast::channel::<Vec<String>>(1000);
-        Self {
-            sender,
-            subscribers: 0,
-        }
-    }
-
-    pub async fn publish(&self, messages: Vec<String>) -> std::result::Result<(), AppError> {
-        let _ = self.sender.send(messages);
-        Ok(())
-    }
-
-    pub fn subscriber_count(&self) -> usize {
-        self.subscribers
-    }
-}
-
-impl Default for WsHub {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl std::fmt::Debug for WsHub {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WsHub")
-            .field("sender", &"...")
-            .field("subscribers", &self.subscribers)
-            .finish()
-    }
-}
-
-/// Application-level cache for state management
 #[derive(Clone)]
 pub struct AppCache {
-    pub scoreboard: Arc<RwLock<ScoreboardState>>,
-    pub challenges: Arc<RwLock<Vec<ChallengeInfo>>>,
+    pub scoreboard: Arc<RwLock<Option<ScoreboardState>>>,
+    pub challenges: Arc<RwLock<Option<Vec<Challenge>>>>,
     pub sessions: Arc<DashMap<String, String>>,
-    pub ws_hub: Arc<WsHub>,
 }
 
 impl Default for AppCache {
@@ -98,84 +21,114 @@ impl Default for AppCache {
 }
 
 impl AppCache {
-    /// Create a new cache with default channels
     pub fn new() -> Self {
-        let (ws_sender, _) = tokio::sync::broadcast::channel::<Vec<String>>(1000);
         Self {
-            scoreboard: Arc::new(RwLock::new(ScoreboardState {
-                challenges: Vec::new(),
-                submissions: Vec::new(),
-                flags: Vec::new(),
-                solved_count: 0,
-                total_score: 0,
-            })),
-            challenges: Arc::new(RwLock::new(Vec::new())),
+            scoreboard: Arc::new(RwLock::new(None)),
+            challenges: Arc::new(RwLock::new(None)),
             sessions: Arc::new(DashMap::new()),
-            ws_hub: Arc::new(WsHub {
-                sender: ws_sender,
-                subscribers: 0,
-            }),
         }
     }
 
-    /// Check if a session exists (simplified check)
+    pub fn invalidate_scoreboard(&self) {
+        if let Ok(mut scoreboard) = self.scoreboard.write() {
+            *scoreboard = None;
+        }
+    }
+
+    pub fn invalidate_challenges(&self) {
+        if let Ok(mut challenges) = self.challenges.write() {
+            *challenges = None;
+        }
+    }
+
+    pub fn get_or_build_scoreboard(&self, conn: &DbConn) -> Result<ScoreboardState, AppError> {
+        if let Some(scoreboard) = self
+            .scoreboard
+            .read()
+            .map_err(|_| anyhow::anyhow!("scoreboard cache lock poisoned"))?
+            .clone()
+        {
+            return Ok(scoreboard);
+        }
+
+        let scoreboard = ScoreboardState::build(conn)?;
+        *self
+            .scoreboard
+            .write()
+            .map_err(|_| anyhow::anyhow!("scoreboard cache lock poisoned"))? =
+            Some(scoreboard.clone());
+        Ok(scoreboard)
+    }
+
+    pub fn get_or_build_challenges(&self, conn: &DbConn) -> Result<Vec<Challenge>, AppError> {
+        if let Some(challenges) = self
+            .challenges
+            .read()
+            .map_err(|_| anyhow::anyhow!("challenge cache lock poisoned"))?
+            .clone()
+        {
+            return Ok(challenges);
+        }
+
+        let challenges = Challenge::list_visible(conn)?;
+        *self
+            .challenges
+            .write()
+            .map_err(|_| anyhow::anyhow!("challenge cache lock poisoned"))? =
+            Some(challenges.clone());
+        Ok(challenges)
+    }
+
+    pub fn is_scoreboard_cached(&self) -> bool {
+        self.scoreboard
+            .read()
+            .map(|scoreboard| scoreboard.is_some())
+            .unwrap_or(false)
+    }
+
+    pub fn is_challenges_cached(&self) -> bool {
+        self.challenges
+            .read()
+            .map(|challenges| challenges.is_some())
+            .unwrap_or(false)
+    }
+
     pub fn is_session_active(&self, token_hash: &str) -> bool {
         self.sessions.contains_key(token_hash)
     }
 
-    /// Add a session (simplified)
     pub fn add_session(&self, token_hash: &str, user_id: String) {
         self.sessions.insert(token_hash.to_string(), user_id);
     }
 
-    /// Revoke a session
     pub fn revoke_session(&self, token_hash: &str) {
         self.sessions.remove(token_hash);
     }
 
-    /// Get user_id by token hash
     pub fn get_session(&self, token_hash: &str) -> Option<String> {
         self.sessions
             .get(token_hash)
             .map(|entry| entry.value().clone())
-    }
-
-    /// Increment scoreboard solved count atomically
-    pub async fn increment_solved(&self) -> u32 {
-        let mut state = self.scoreboard.write().expect("scoreboard lock poisoned");
-        state.solved_count += 1;
-        state.total_score =
-            state.solved_count * state.challenges.first().map(|c| c.points).unwrap_or(0);
-        state.solved_count
-    }
-
-    /// Add a challenge to the cache
-    pub fn add_challenge(&self, challenge: ChallengeInfo) {
-        let mut challenges = self.challenges.write().unwrap();
-        challenges.push(challenge);
-    }
-
-    /// Get all challenges
-    pub fn get_all_challenges(&self) -> Vec<ChallengeInfo> {
-        let challenges = self.challenges.read().unwrap();
-        challenges.clone()
-    }
-
-    /// Placeholder invalidation hook used by Sprint 6. Sprint 7 replaces this
-    /// with a canonical scoreboard cache.
-    pub fn invalidate_scoreboard(&self) {
-        if let Ok(mut scoreboard) = self.scoreboard.write() {
-            *scoreboard = ScoreboardState::default();
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use r2d2::Pool;
+    use r2d2_sqlite::SqliteConnectionManager;
 
-    #[tokio::test]
-    async fn test_app_cache() {
+    fn test_pool() -> crate::db::DbPool {
+        let pool = Pool::new(SqliteConnectionManager::memory()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            crate::db::run_migrations(&conn).unwrap();
+        }
+        pool
+    }
+
+    #[test]
+    fn cache_sessions_still_work() {
         let cache = AppCache::new();
         cache.add_session("token123", "1".to_string());
         assert!(cache.is_session_active("token123"));
@@ -184,18 +137,45 @@ mod tests {
         assert!(!cache.is_session_active("token123"));
     }
 
-    #[tokio::test]
-    async fn test_increment_solved() {
+    #[test]
+    fn get_or_build_scoreboard_caches_until_invalidated() {
+        let pool = test_pool();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO teams (id, name, invite_code, score) VALUES (1, 'A', 'ABCDEFGH', 10)",
+            [],
+        )
+        .unwrap();
+
         let cache = AppCache::new();
-        let challenges = vec![ChallengeInfo {
-            id: 1,
-            title: "Test".to_string(),
-            category: "Crypto".to_string(),
-            points: 100,
-            solved: 0,
-        }];
-        cache.scoreboard.write().unwrap().challenges = challenges;
-        let count = cache.increment_solved().await;
-        assert_eq!(count, 1);
+        assert!(!cache.is_scoreboard_cached());
+        let scoreboard = cache.get_or_build_scoreboard(&conn).unwrap();
+        assert_eq!(scoreboard.teams.len(), 1);
+        assert!(cache.is_scoreboard_cached());
+        cache.invalidate_scoreboard();
+        assert!(!cache.is_scoreboard_cached());
+    }
+
+    #[test]
+    fn get_or_build_challenges_caches_visible_challenges() {
+        let pool = test_pool();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO challenges (
+                slug, title, description, category, flag_hash, flag_salt, flag_type,
+                flag_case_sensitive, points, max_points, min_points, decay_rate, is_hidden, created_at
+             )
+             VALUES ('visible', 'Visible', 'desc', 'web', 'hash', 'salt', 'static',
+                0, 100, 500, 50, 12, 0, 1)",
+            [],
+        )
+        .unwrap();
+
+        let cache = AppCache::new();
+        let challenges = cache.get_or_build_challenges(&conn).unwrap();
+        assert_eq!(challenges.len(), 1);
+        assert!(cache.is_challenges_cached());
+        cache.invalidate_challenges();
+        assert!(!cache.is_challenges_cached());
     }
 }

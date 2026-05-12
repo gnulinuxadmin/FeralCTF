@@ -65,7 +65,9 @@ pub async fn list_challenges(
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
 
-    let challenges = Challenge::list_visible(&conn)?
+    let challenges = state
+        .cache
+        .get_or_build_challenges(&conn)?
         .into_iter()
         .map(|challenge| challenge.to_public(&conn, team_id))
         .collect::<Result<Vec<_>, _>>()?;

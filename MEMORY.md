@@ -13,19 +13,20 @@ Sprints complete:
 - Sprint 4 - Models
 - Sprint 5 - Auth handlers
 - Sprint 6 - Challenge handlers + flag submission
+- Sprint 7 - Scoreboard + cache
 
 Current state file should read:
 
 ```text
-SPRINT 6 DONE
-DONE_COUNT: 7
+SPRINT 7 DONE
+DONE_COUNT: 8
 TOTAL_SPRINTS: 14
-SPRINTS_REMAINING: 7
+SPRINTS_REMAINING: 6
 ```
 
 Next sprint:
 
-- Sprint 7 - Scoreboard + Cache
+- Sprint 8 - WebSocket Hub
 
 ## Verified Baseline
 
@@ -40,7 +41,7 @@ cargo clippy --all-targets --all-features
 Last known test count:
 
 ```text
-26 passed
+31 passed
 ```
 
 ## Key Implementation Notes
@@ -139,6 +140,21 @@ Important Sprint 5 details:
 - Already-solved submissions return `correct: false` with message `"already solved"`.
 - `src/scoring.rs` implements `dynamic_points`, `recalculate_challenge_points`, and full team-score recalculation from solves minus hint deductions.
 - `src/anticheat.rs` has the Sprint 6 `check_rate_limit` hook; full enforcement remains Sprint 11.
+
+### Sprint 7
+
+- `src/cache.rs` now implements canonical `AppCache` with `RwLock<Option<ScoreboardState>>` and `RwLock<Option<Vec<Challenge>>>`.
+- `AppCache::get_or_build_scoreboard()` and `get_or_build_challenges()` serve cached data until invalidated.
+- `src/handlers/scoreboard.rs` implements:
+  - `GET /api/scoreboard`
+  - `GET /api/scoreboard/graph`
+  - `GET /api/teams/{id}`
+  - `POST /api/teams`
+  - `POST /api/teams/join`
+- `snapshot_scores()` inserts current team scores into `score_history`.
+- `spawn_score_snapshot_task()` provides the 5-minute background snapshot loop for server startup wiring.
+- Sprint 6 challenge listing now uses `AppCache::get_or_build_challenges()`.
+- Correct submissions and team create/join invalidate the scoreboard cache.
 
 ## Known Cautions
 
