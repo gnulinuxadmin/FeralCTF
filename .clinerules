@@ -1,0 +1,15 @@
+## .clinerules
+
+* Do not ever edit any spec files.
+
+* Use write_to_file instead of replace_in_file.
+
+* Don't overcomplicate changes, try to touch as little code as possible to fix a problem unless told to refactor.
+
+* Don't keep trying the same thing over and over if it generates the same error.
+
+* Always fix any compilation errors before proceeeding to the next task.
+
+* Try not to make assumptions; ask for clarity.
+
+* Adhere to the specification for structures and interfaces.

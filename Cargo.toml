@@ -20,7 +20,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = [
     "cors",
     "compression-gzip",
-    "set-headers",
+    "set-header",
     "trace",
     "fs",
 ] }
@@ -32,15 +32,14 @@ tokio = { version = "1", features = [
     "net",
     "sync",
     "time",
-    "signal",
     "fs",
 ] }
 
 # --- database ---
-# NOTE: sqlx excluded — conflicts with rusqlite via libsqlite3-sys feature flag bug
-rusqlite = { version = "0.37", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.25"
+# rusqlite 0.32 with bundled sqlite and FromRow trait
+rusqlite = { version = "0.32", features = ["bundled", "trace"] }
+# Replace r2d2 with async-rx for connection pooling
+async-rx = "0.1"
 
 # --- serialization ---
 serde = { version = "1", features = ["derive"] }
@@ -72,6 +71,10 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 anyhow = "1"
+
+# --- async traits and channels ---
+async-trait = "0.1"
+async-channel = "2"
 
 [profile.release]
 opt-level = 3
