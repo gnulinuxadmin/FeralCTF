@@ -16,11 +16,12 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS teams (
-    id            INTEGER PRIMARY KEY,
-    name          TEXT NOT NULL UNIQUE,
-    invite_code   TEXT NOT NULL UNIQUE,
-    score         INTEGER NOT NULL DEFAULT 0,
-    last_solve_at INTEGER
+    id               INTEGER PRIMARY KEY,
+    name             TEXT NOT NULL UNIQUE,
+    invite_code      TEXT NOT NULL UNIQUE,
+    score            INTEGER NOT NULL DEFAULT 0,
+    last_solve_at    INTEGER,
+    is_disqualified  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS challenges (

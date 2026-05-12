@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900" role="img" aria-labelledby="title desc">
+  <title id="title">FeralCTF high-level architecture</title>
+  <desc id="desc">A high-level diagram showing users connecting through a reverse proxy to a single FeralCTF Rust process, which contains Axum routes, auth, handlers, cache, WebSocket hub, background jobs, storage, and SQLite.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fb; }
+      .title { font: 700 42px Inter, Arial, sans-serif; fill: #101828; }
+      .subtitle { font: 400 20px Inter, Arial, sans-serif; fill: #475467; }
+      .label { font: 700 24px Inter, Arial, sans-serif; fill: #101828; }
+      .small { font: 500 17px Inter, Arial, sans-serif; fill: #344054; }
+      .tiny { font: 500 15px Inter, Arial, sans-serif; fill: #667085; }
+      .box { fill: #ffffff; stroke: #c7d7fe; stroke-width: 2; rx: 18; }
+      .core { fill: #eef4ff; stroke: #6172f3; stroke-width: 3; rx: 26; }
+      .store { fill: #ecfdf3; stroke: #17b26a; stroke-width: 3; rx: 22; }
+      .warn { fill: #fff8e6; stroke: #f79009; stroke-width: 2; rx: 18; }
+      .line { stroke: #667085; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .softline { stroke: #98a2b3; stroke-width: 2.5; fill: none; marker-end: url(#arrowSoft); stroke-dasharray: 8 8; }
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#667085"/>
+    </marker>
+    <marker id="arrowSoft" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth">
+      <path d="M2,2 L10,6 L2,10 Z" fill="#98a2b3"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1400" height="900"/>
+
+  <text class="title" x="80" y="80">FeralCTF Architecture</text>
+  <text class="subtitle" x="80" y="115">Single Rust process, SQLite storage, cached hot paths, live WebSocket events</text>
+
+  <rect class="box" x="70" y="185" width="250" height="150"/>
+  <text class="label" x="105" y="235">Players</text>
+  <text class="small" x="105" y="270">Register, join teams,</text>
+  <text class="small" x="105" y="298">solve challenges</text>
+
+  <rect class="box" x="70" y="385" width="250" height="150"/>
+  <text class="label" x="105" y="435">Admins</text>
+  <text class="small" x="105" y="470">Manage events, teams,</text>
+  <text class="small" x="105" y="498">challenges, backups</text>
+
+  <rect class="warn" x="400" y="275" width="245" height="170"/>
+  <text class="label" x="435" y="325">TLS Proxy</text>
+  <text class="small" x="435" y="360">Caddy or nginx</text>
+  <text class="tiny" x="435" y="392">HTTPS termination</text>
+
+  <rect class="core" x="720" y="150" width="575" height="520"/>
+  <text class="label" x="765" y="205">FeralCTF Rust Process</text>
+  <text class="tiny" x="765" y="235">Tokio runtime + Axum router</text>
+
+  <rect class="box" x="760" y="275" width="210" height="105"/>
+  <text class="small" x="795" y="320">Auth + Sessions</text>
+  <text class="tiny" x="795" y="350">JWT, Argon2id</text>
+
+  <rect class="box" x="1015" y="275" width="230" height="105"/>
+  <text class="small" x="1050" y="320">API Handlers</text>
+  <text class="tiny" x="1050" y="350">Auth, challenges, admin</text>
+
+  <rect class="box" x="760" y="420" width="210" height="105"/>
+  <text class="small" x="795" y="465">In-Process Cache</text>
+  <text class="tiny" x="795" y="495">Scoreboard, challenges</text>
+
+  <rect class="box" x="1015" y="420" width="230" height="105"/>
+  <text class="small" x="1050" y="465">WebSocket Hub</text>
+  <text class="tiny" x="1050" y="495">Live solves + scores</text>
+
+  <rect class="box" x="885" y="560" width="240" height="75"/>
+  <text class="small" x="922" y="605">Background Jobs</text>
+  <text class="tiny" x="922" y="628">Snapshots, cleanup</text>
+
+  <rect class="store" x="735" y="735" width="255" height="95"/>
+  <text class="label" x="775" y="785">SQLite</text>
+  <text class="tiny" x="775" y="812">WAL mode, local DB</text>
+
+  <rect class="store" x="1040" y="735" width="255" height="95"/>
+  <text class="label" x="1080" y="785">Attachments</text>
+  <text class="tiny" x="1080" y="812">Files outside webroot</text>
+
+  <path class="line" d="M320 260 C355 260 365 315 400 325"/>
+  <path class="line" d="M320 460 C355 460 365 405 400 395"/>
+  <path class="line" d="M645 360 L720 360"/>
+  <path class="line" d="M1005 670 L890 735"/>
+  <path class="line" d="M1085 670 L1160 735"/>
+  <path class="softline" d="M1130 420 C1130 385 1130 385 1130 380"/>
+  <path class="softline" d="M865 420 L865 380"/>
+  <path class="softline" d="M970 472 L1015 472"/>
+  <path class="softline" d="M1005 560 L1005 525"/>
+
+  <text class="tiny" x="395" y="470">Reverse proxy recommended for production TLS</text>
+  <text class="tiny" x="735" y="705">Persistent state</text>
+  <text class="tiny" x="1050" y="705">Challenge assets</text>
+</svg>

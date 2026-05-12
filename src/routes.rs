@@ -1,5 +1,9 @@
 use crate::AppState;
-use crate::handlers::admin::{dashboard, get_teams, get_users};
+use crate::handlers::admin::{
+    announce, backup, ban_user, competition_end, competition_freeze, competition_start,
+    create_challenge, dashboard, delete_challenge, disqualify_team, get_teams, get_users,
+    list_submissions, require_admin, update_challenge,
+};
 use crate::handlers::auth::{change_password, login, logout, me, register};
 use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
 use crate::handlers::scoreboard::{
@@ -8,10 +12,32 @@ use crate::handlers::scoreboard::{
 use crate::handlers::ws::ws_handler;
 use axum::{
     Router,
-    routing::{get, post, put},
+    middleware,
+    routing::{delete, get, post, put},
 };
 
-pub fn create_router() -> Router<AppState> {
+/// Build the application router. Takes ownership of AppState so the admin
+/// middleware can be baked in via `from_fn_with_state`.
+pub fn create_router(state: AppState) -> Router {
+    let admin_router = Router::new()
+        .route("/api/admin", get(dashboard))
+        .route("/api/admin/challenges", post(create_challenge))
+        .route(
+            "/api/admin/challenges/{id}",
+            put(update_challenge).delete(delete_challenge),
+        )
+        .route("/api/admin/submissions", get(list_submissions))
+        .route("/api/admin/users", get(get_users))
+        .route("/api/admin/users/{id}/ban", post(ban_user))
+        .route("/api/admin/teams", get(get_teams))
+        .route("/api/admin/teams/{id}/disqualify", post(disqualify_team))
+        .route("/api/admin/competition/start", post(competition_start))
+        .route("/api/admin/competition/end", post(competition_end))
+        .route("/api/admin/competition/freeze", post(competition_freeze))
+        .route("/api/admin/announce", post(announce))
+        .route("/api/admin/backup", get(backup))
+        .route_layer(middleware::from_fn_with_state(state.clone(), require_admin));
+
     Router::new()
         // Auth routes
         .route("/api/auth/register", post(register))
@@ -33,10 +59,9 @@ pub fn create_router() -> Router<AppState> {
         .route("/api/teams/{id}", get(get_team_profile))
         .route("/api/teams", post(create_team))
         .route("/api/teams/join", post(join_team))
-        // Admin routes
-        .route("/api/admin", get(dashboard))
-        .route("/api/admin/users", get(get_users))
-        .route("/api/admin/teams", get(get_teams))
         // WebSocket
         .route("/ws", get(ws_handler))
+        // Admin (require_admin middleware applied inside admin_router)
+        .merge(admin_router)
+        .with_state(state)
 }
