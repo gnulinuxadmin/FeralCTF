@@ -1,7 +1,7 @@
 // FeralCTF - Challenge handler module
 // Implements FERALCTF_SPEC.md section 7.1
 
-use crate::database::DatabaseState;
+use crate::AppState;
 use crate::errors::HandlerResult;
 use crate::models::challenge::{Challenge, Submission};
 use axum::{
@@ -37,7 +37,7 @@ impl<T: Serialize> IntoResponse for ChallengeListResponse<T> {
 }
 
 pub async fn list_challenges(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Query(params): Query<ChallengeFilters>,
 ) -> HandlerResult<ChallengeListResponse<Challenge>> {
     // Placeholder - implement actual query
@@ -47,7 +47,7 @@ pub async fn list_challenges(
 }
 
 pub async fn get_challenge(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> HandlerResult<ChallengeResponse<Challenge>> {
     // Placeholder - implement actual query
@@ -55,7 +55,7 @@ pub async fn get_challenge(
 }
 
 pub async fn solve_challenge(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Path(id): Path<i64>,
     submission: Json<Submission>,
 ) -> HandlerResult<String> {
@@ -63,7 +63,7 @@ pub async fn solve_challenge(
 }
 
 pub async fn submit_flag(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Path(id): Path<i64>,
     flag: String,
 ) -> HandlerResult<String> {
@@ -71,7 +71,7 @@ pub async fn submit_flag(
 }
 
 pub async fn get_challenge_stats(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> HandlerResult<ChallengeResponse<Challenge>> {
     // Placeholder
@@ -79,7 +79,7 @@ pub async fn get_challenge_stats(
 }
 
 pub async fn get_challenge_tags(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> HandlerResult<Vec<String>> {
     // Placeholder
@@ -87,7 +87,7 @@ pub async fn get_challenge_tags(
 }
 
 pub async fn get_challenge_category(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> HandlerResult<String> {
     // Placeholder
@@ -95,7 +95,7 @@ pub async fn get_challenge_category(
 }
 
 pub async fn get_challenge_difficulty(
-    State(db_state): State<DatabaseState>,
+    State(db_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> HandlerResult<String> {
     // Placeholder

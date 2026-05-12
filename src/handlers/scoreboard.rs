@@ -1,7 +1,7 @@
 // FeralCTF - Scoreboard handler module
 // Implements FERALCTF_SPEC.md section 7.5
 
-use crate::database::DatabaseState;
+use crate::AppState;
 use crate::errors::HandlerResult;
 use crate::models::scoreboard::ScoreboardState;
 use axum::{
@@ -24,7 +24,7 @@ impl<T: Serialize> IntoResponse for ScoreboardResponse<T> {
 }
 
 pub async fn get_scoreboard(
-    State(_db_state): State<DatabaseState>,
+    State(_db_state): State<AppState>,
     Query(_params): Query<ScoreboardFilters>,
 ) -> HandlerResult<Json<ScoreboardState>> {
     // Placeholder

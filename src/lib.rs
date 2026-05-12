@@ -16,7 +16,14 @@ pub mod routes;
 pub mod scoring;
 pub mod storage;
 
-pub struct AppState;
+use std::sync::Arc;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: db::DbPool,
+    pub config: Arc<config::Config>,
+    pub cache: Arc<cache::AppCache>,
+}
 
 pub use cache::AppCache;
 pub use config::Config;

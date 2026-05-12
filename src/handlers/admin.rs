@@ -1,7 +1,7 @@
 // FeralCTF - Admin handler module
 // Implements FERALCTF_SPEC.md section 7.3
 
-use crate::database::DatabaseState;
+use crate::AppState;
 use crate::errors::HandlerResult;
 use axum::{
     extract::State,
@@ -22,28 +22,28 @@ impl<T: Serialize> IntoResponse for AdminResponse<T> {
     }
 }
 
-pub async fn dashboard(State(_db_state): State<DatabaseState>) -> HandlerResult<String> {
+pub async fn dashboard(State(_db_state): State<AppState>) -> HandlerResult<String> {
     Ok("Admin dashboard".to_string())
 }
 
-pub async fn get_users(State(_db_state): State<DatabaseState>) -> HandlerResult<String> {
+pub async fn get_users(State(_db_state): State<AppState>) -> HandlerResult<String> {
     Ok("Get all users".to_string())
 }
 
-pub async fn get_teams(State(_db_state): State<DatabaseState>) -> HandlerResult<String> {
+pub async fn get_teams(State(_db_state): State<AppState>) -> HandlerResult<String> {
     Ok("Get all teams".to_string())
 }
 
-pub async fn reset_scores(State(_db_state): State<DatabaseState>) -> HandlerResult<String> {
+pub async fn reset_scores(State(_db_state): State<AppState>) -> HandlerResult<String> {
     Ok("Reset all scores".to_string())
 }
 
-pub async fn purge_old_solves(State(_db_state): State<DatabaseState>) -> HandlerResult<String> {
+pub async fn purge_old_solves(State(_db_state): State<AppState>) -> HandlerResult<String> {
     Ok("Purge old solves".to_string())
 }
 
 pub async fn update_challenge(
-    State(_db_state): State<DatabaseState>,
+    State(_db_state): State<AppState>,
     challenge_id: i64,
     data: Json<ChallengeUpdate>,
 ) -> HandlerResult<String> {
@@ -51,7 +51,7 @@ pub async fn update_challenge(
 }
 
 pub async fn ban_user(
-    State(_db_state): State<DatabaseState>,
+    State(_db_state): State<AppState>,
     username: &str,
 ) -> HandlerResult<String> {
     Ok("User banned".to_string())
