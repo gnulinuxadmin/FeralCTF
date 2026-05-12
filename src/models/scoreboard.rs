@@ -49,3 +49,6 @@ pub struct TeamStats {
     pub best_category: Option<String>,
     pub streak: i32,
 }
+
+/// Public scoreboard type exposed to handlers
+pub type Scoreboard = Vec<ScoreboardEntry>;

@@ -18,6 +18,16 @@ pub struct User {
     pub is_active: bool,
 }
 
+/// User data structure for authentication/authorization contexts
+#[derive(Debug, Clone)]
+pub struct UserData {
+    pub user_id: i32,
+    pub username: String,
+    pub role: String,
+    pub is_admin: bool,
+}
+
+/// Statistics for a user's challenge progress
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserStats {
     pub total_points: i64,
