@@ -1,6 +1,8 @@
 # FeralCTF — Technical Specification v1.0
 
-<img src="feral10.jpg" alt="FeralCTF logo" width="240" height="240">
+<p align="center">
+  <img src="feral10.jpg" alt="FeralCTF logo" width="260" height="360">
+</p>
 
 
 > **Purpose of this document:** Complete implementation specification for the FeralCTF platform.
