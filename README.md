@@ -14,7 +14,7 @@ For the complete technical design, schema, API details, security model, and road
 
 FeralCTF is under active development.
 
-The backend foundation is now in place through anti-cheat and rate limiting.
+The core application is taking shape as a single-binary CTF platform with an embedded player and admin interface.
 
 Status summary:
 
@@ -22,9 +22,10 @@ Status summary:
 - Player authentication, teams, challenges, scoring, scoreboard, live event plumbing, and admin controls are in place.
 - Challenge import/export is implemented, including dry-run import and CTFd detection.
 - Submission rate limiting, exponential wrong-attempt backoff, and flag-sharing detection are implemented.
+- The browser interface is served by the Rust binary without requiring a Node.js production runtime.
 - The codebase is regularly checked with `cargo check`, `cargo test`, and `cargo clippy --all-targets --all-features`.
 
-The frontend SPA, release hardening, and final single-binary packaging are still upcoming.
+Installer-style CLI commands, release hardening, security headers, audit logging, and final release validation are still upcoming.
 
 ## Architecture Overview
 
@@ -44,7 +45,7 @@ At a high level:
 - **Salted SHA-256 flag hashes** protect static challenge flags.
 - **WebSocket broadcast channel** publishes live public events such as solves and scoreboard updates.
 - **In-process anti-cheat state** enforces submission rate limits and wrong-attempt backoff.
-- **Vanilla JavaScript/CSS frontend** is planned to be embedded into the final binary.
+- **Vanilla JavaScript/CSS frontend** is embedded into the binary with `rust-embed`.
 
 The intended runtime model is:
 
@@ -116,6 +117,12 @@ The following pieces are implemented:
 - Submission rate limiting with HTTP 429 and `Retry-After`
 - Exponential backoff for repeated wrong flag submissions
 - Flag-sharing detection with indexed submission lookup and warning-only alerts
+- Embedded vanilla JavaScript SPA served by the Rust binary
+- Challenges view with category filter, search, challenge modal, hints, files, and flag submission
+- Live scoreboard view that updates from WebSocket `score_update` events
+- Profile view with team score/rank and solve history
+- Admin SPA surfaces for overview, challenges, users, teams, and settings
+- JWT session storage in the browser via `sessionStorage`
 
 ## How The Finished Application Will Work
 
@@ -199,8 +206,6 @@ Operational expectations:
 
 Planned upcoming work includes:
 
-- Frontend SPA for players and admins
-- Embedded frontend assets via `rust-embed`
 - CLI commands such as initialization and migration
 - Security headers and HTTP hardening
 - Audit logging for admin actions
@@ -312,10 +317,10 @@ src/
   handlers/               # HTTP and WebSocket handlers
   import_export.rs        # challenge bundle export/import and CTFd adapter
   models/                 # database-backed domain models
-  routes.rs               # Axum route wiring
+  routes.rs               # Axum route wiring and embedded frontend fallback
   scoring.rs              # dynamic scoring and score recalculation
   anticheat.rs            # anti-cheat and rate limiting
-frontend/                 # planned vanilla JS frontend
+frontend/                 # embedded vanilla JS frontend
 migrations/               # SQLite migrations
 FERALCTF_SPEC.md          # full technical specification
 ```

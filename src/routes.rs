@@ -11,9 +11,18 @@ use crate::handlers::scoreboard::{
 };
 use crate::handlers::ws::ws_handler;
 use axum::{
-    Router, middleware,
-    routing::{delete, get, post, put},
+    Router,
+    body::Body,
+    http::{StatusCode, Uri, header},
+    middleware,
+    response::{IntoResponse, Response},
+    routing::{get, post, put},
 };
+use rust_embed::RustEmbed;
+
+#[derive(RustEmbed)]
+#[folder = "frontend/"]
+struct FrontendAssets;
 
 /// Build the application router. Takes ownership of AppState so the admin
 /// middleware can be baked in via `from_fn_with_state`.
@@ -64,5 +73,37 @@ pub fn create_router(state: AppState) -> Router {
         .route("/ws", get(ws_handler))
         // Admin (require_admin middleware applied inside admin_router)
         .merge(admin_router)
+        .fallback(frontend)
         .with_state(state)
+}
+
+async fn frontend(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
+    if path.starts_with("api/") || path == "ws" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    let asset_path = if path.is_empty() { "index.html" } else { path };
+    asset_response(asset_path).unwrap_or_else(|| {
+        asset_response("index.html").unwrap_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "embedded frontend index.html is missing",
+            )
+                .into_response()
+        })
+    })
+}
+
+fn asset_response(path: &str) -> Option<Response> {
+    let asset = FrontendAssets::get(path)?;
+    let mime = mime_guess::from_path(path).first_or_octet_stream();
+    match Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime.as_ref())
+        .body(Body::from(asset.data.into_owned()))
+    {
+        Ok(response) => Some(response),
+        Err(_) => Some(StatusCode::INTERNAL_SERVER_ERROR.into_response()),
+    }
 }

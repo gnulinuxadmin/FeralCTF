@@ -32,10 +32,10 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     let _score_snapshots = feralctf::handlers::scoreboard::spawn_score_snapshot_task(state.clone());
     let _rate_limit_gc = feralctf::anticheat::spawn_rate_limiter_gc_task(rate_limiter);
 
-    let router = feralctf::routes::create_router(state);
+    let app = feralctf::routes::create_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "feralctf listening");
-    axum::serve(listener, router).await?;
+    axum::serve(listener, app).await?;
     Ok(())
 }
 

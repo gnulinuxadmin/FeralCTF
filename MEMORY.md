@@ -18,19 +18,20 @@ Sprints complete:
 - Sprint 9 - Admin console APIs
 - Sprint 10 - Import / Export
 - Sprint 11 - Anti-Cheat + Rate Limiting
+- Sprint 12 - Frontend SPA
 
 Current state file should read:
 
 ```text
-SPRINT 11 DONE
-DONE_COUNT: 12
+SPRINT 12 DONE
+DONE_COUNT: 13
 TOTAL_SPRINTS: 14
-SPRINTS_REMAINING: 2
+SPRINTS_REMAINING: 1
 ```
 
 Next sprint:
 
-- Sprint 12 - Frontend SPA
+- Sprint 13 - CLI Subcommands + Hardening
 
 ## Verified Baseline
 
@@ -220,6 +221,20 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - `spawn_rate_limiter_gc_task()` runs every 60 seconds and only cleans in-memory limiter state.
 - `check_flag_sharing()` detects the same correct submitted flag from another team inside `rate_limit.flag_sharing_window_seconds` and logs a warning only.
 - Sprint 11 decision: `migrations/001_initial.sql` includes `idx_submissions_flag_sharing` on `(challenge_id, flag, is_correct, submitted_at)` so flag-sharing detection can use a purpose-built index.
+
+### Sprint 12
+
+- `frontend/index.html`, `frontend/app.js`, and `frontend/style.css` implement the vanilla JS SPA.
+- The SPA includes Challenges, Scoreboard, Profile, and Admin views.
+- Challenge cards support category filtering, title search, solved markers, solve counts, point display, and a difficulty dot.
+- Challenge detail modals load from `GET /api/challenges/{id}`, show files and hints, and submit flags through `POST /api/challenges/{id}/submit`.
+- JWTs are stored in `sessionStorage` under `feralctf_token`.
+- All authenticated frontend API calls send `Authorization: Bearer <token>`.
+- The scoreboard connects to public `GET /ws` and re-renders on `score_update` events without a page reload.
+- WebSocket reconnect uses exponential backoff.
+- `src/routes.rs` embeds `frontend/` with `rust-embed` and serves the SPA for non-API paths.
+- Admin middleware remains scoped to admin routes only; public auth, challenge, scoreboard, team, and WebSocket routes are not wrapped by `require_admin`.
+- No new dependencies were added for Sprint 12; existing `rust-embed` and `mime_guess` are used.
 
 ## Known Cautions
 
