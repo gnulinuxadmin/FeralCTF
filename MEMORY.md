@@ -151,7 +151,7 @@ Important Sprint 5 details:
 - Correct submissions insert `solves`, recalculate scores, invalidate the cache stub, and insert `score_history`.
 - Already-solved submissions return `correct: false` with message `"already solved"`.
 - `src/scoring.rs` implements `dynamic_points`, `recalculate_challenge_points`, and full team-score recalculation from solves minus hint deductions.
-- `src/anticheat.rs` has the Sprint 6 `check_rate_limit` hook; full enforcement remains Sprint 11.
+- Sprint 6 originally used a placeholder anti-cheat hook; Sprint 11 replaced it with real `RateLimiter` enforcement.
 
 ### Sprint 7
 
