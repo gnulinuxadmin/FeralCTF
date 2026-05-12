@@ -1,6 +1,8 @@
 # FeralCTF
 
-![FeralCTF logo](feral10.jpg)
+<p align="center">
+  <img src="feral10.jpg" alt="FeralCTF logo" width="180">
+</p>
 
 FeralCTF is a lightweight, self-hosted Capture The Flag platform for academic, nonprofit, workshop, and small-to-medium competition environments. The goal is a simple deployment story: one Rust binary, SQLite storage, embedded frontend assets, and no required database server, Node.js runtime, Docker stack, or external services.
 
