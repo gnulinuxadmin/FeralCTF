@@ -287,7 +287,7 @@ async function openChallenge(id) {
           <span>${challenge.points} pts</span>
           <span>${challenge.solve_count} solves</span>
         </div>
-        <p class="description">${escapeHtml(challenge.description)}</p>
+        <p class="description">${renderDescription(challenge.description)}</p>
         <div class="file-list">${(detail.files || []).map(fileLink).join('') || '<p class="muted">No files attached.</p>'}</div>
         <div class="hint-list">${(detail.hints || []).map((hint) => hintRow(challenge.id, hint)).join('') || '<p class="muted">No hints available.</p>'}</div>
         <form id="flag-form" class="flag-form">
@@ -531,7 +531,7 @@ async function renderAdminChallenges() {
       <input name="category" placeholder="category" required>
       <input name="points" type="number" placeholder="points" required>
       <input name="flag" placeholder="flag" required>
-      <textarea name="description" placeholder="description"></textarea>
+      <textarea name="description" placeholder="description" rows="6"></textarea>
       <label class="toggle-row">
         <span>Start visible</span>
         <span class="toggle-switch">
@@ -656,7 +656,7 @@ function openEditChallengeModal(challenge) {
           <input name="flag" placeholder="flag{...}" autocomplete="off">
         </label>
         <label><span>Description</span>
-          <textarea name="description">${escapeHtml(challenge.description)}</textarea>
+          <textarea name="description" rows="6">${escapeHtml(challenge.description)}</textarea>
         </label>
         <label class="toggle-row">
           <span>Visible</span>
@@ -816,6 +816,22 @@ function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = String(value ?? '');
   return div.innerHTML;
+}
+
+function renderDescription(text) {
+  const raw = String(text ?? '');
+  const urlRegex = /https?:\/\/[^\s]+/g;
+  let result = '';
+  let lastIndex = 0;
+  let match;
+  while ((match = urlRegex.exec(raw)) !== null) {
+    result += escapeHtml(raw.slice(lastIndex, match.index));
+    const url = escapeHtml(match[0]);
+    result += `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`;
+    lastIndex = urlRegex.lastIndex;
+  }
+  result += escapeHtml(raw.slice(lastIndex));
+  return result;
 }
 
 function difficultyFor(points) {

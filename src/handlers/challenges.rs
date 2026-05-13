@@ -59,7 +59,7 @@ pub async fn list_challenges(
     headers: HeaderMap,
 ) -> HandlerResult<Json<ChallengeListResponse>> {
     let user = current_user(&state, &headers)?;
-    let team_id = require_team_id(&user)?;
+    let team_id = user.team_id.unwrap_or(0);
     let conn = state
         .db
         .get()
@@ -82,7 +82,7 @@ pub async fn get_challenge(
     Path(id): Path<i64>,
 ) -> HandlerResult<Json<ChallengeDetailResponse>> {
     let user = current_user(&state, &headers)?;
-    let team_id = require_team_id(&user)?;
+    let team_id = user.team_id.unwrap_or(0);
     let conn = state
         .db
         .get()

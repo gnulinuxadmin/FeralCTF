@@ -401,6 +401,12 @@ label span {
   white-space: pre-wrap;
 }
 
+.description a {
+  color: var(--accent);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
 .file-list,
 .hint-list,
 .history {
@@ -436,6 +442,11 @@ label span {
 .admin-form {
   display: grid;
   gap: 0.75rem;
+}
+
+.admin-form textarea {
+  min-height: 120px;
+  resize: vertical;
 }
 
 /* ---- Scoreboard ---- */
