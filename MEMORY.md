@@ -272,7 +272,7 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - `renderAdminChallenges()` in `frontend/app.js` now fetches from `GET /api/admin/challenges` (admin endpoint) instead
   of `state.challenges` (populated by the player endpoint which omits hidden challenges).
 - `toggleChallengeVisibility()` in `frontend/app.js` calls `PUT /api/admin/challenges/{id}` with
-  `{ is_hidden: !current }`.
+  `{ is_hidden: desired }` and now awaits `loadChallenges()` so the player view syncs without a page refresh.
 - `frontend/feral10.jpg` copied from project root so `rust-embed` includes it; rendered as `.brand-icon` in topbar.
 - Challenge cards updated: `.card-top / .card-bottom`, difficulty dot (`.easy/.medium/.hard`), category color border,
   solve count, solved marker. Category filter uses `.cat-pill` buttons instead of `<select>`.
@@ -282,6 +282,26 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   .live-dot`, admin sidebar `border-left` active style. Responsive breakpoints updated.
 - `updateAuth()` and `loginUser()` both call `updateAuth()` after `Promise.all([loadChallenges(), loadScoreboard()])`
   to ensure score display is accurate on initial load and on login.
+
+### Post-Sprint 13 continued (bug fixes + polish)
+
+- **`list_challenges` / `get_challenge` team requirement removed** — Both handlers previously called
+  `require_team_id()`, returning 400 for any user without a team (including fresh admin accounts). Fixed to use
+  `user.team_id.unwrap_or(0)`; teamless users see all visible challenges with `solved_by_team: false`.
+- **Challenge edit modal** — `openEditChallengeModal(challenge)` and `updateChallenge(event, id)` added to
+  `frontend/app.js`. Edit button appears in each admin challenge row. Modal pre-fills title, category, points,
+  description, and visibility toggle. Flag field is optional (blank = keep existing hash).
+- **Challenge create defaults** — New challenges default to `is_hidden: true` (hidden) and
+  `flag_case_sensitive: false`. Visibility toggle on the create form lets admin publish immediately.
+- **`renderDescription()`** — Added to `frontend/app.js`. Escapes non-URL text, wraps `https?://...` patterns in
+  `<a href="..." target="_blank" rel="noopener noreferrer">` links. Used in the challenge detail modal.
+- **Description textarea** — `rows="6"` and `min-height: 120px; resize: vertical` in CSS. Applies to both create
+  and edit forms.
+- **Flag input placeholder** — Changed from `feralctf{...}` to `FLAG{...}`.
+- **Empty file/hint messages removed** — "No files attached." and "No hints available." placeholder text removed from
+  the challenge detail modal; empty lists render nothing.
+- **Architecture spec docx/PDF** — Duplicate `rusqlite` rows in section 2.1 table (0.7.x and 0.31.x) merged into a
+  single correct row (`0.32.x / SQLite queries, migrations, backup`). PDF regenerated from docx via LibreOffice.
 
 ## Known Cautions
 

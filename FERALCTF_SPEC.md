@@ -811,7 +811,7 @@ Current release: **1.0rc5**. All core sprints (0–13) complete. All items below
 - [x] User registration + login
 - [x] Team creation + invite-code join
 - [x] Challenge CRUD (admin)
-- [x] Challenge list endpoint with solve status per team
+- [x] Challenge list endpoint with solve status per team (teamless users see challenges with `solved_by_team: false`)
 - [x] Flag submission (static)
 - [x] Flag submission (regex)
 - [x] Dynamic scoring formula
@@ -830,7 +830,11 @@ Current release: **1.0rc5**. All core sprints (0–13) complete. All items below
 - [x] Themed error page for unknown routes (404 and other HTTP error codes)
 - [x] Challenge cards — category color, difficulty dot, solve count, solved marker
 - [x] Category filter pills and title search on challenge grid
-- [x] Challenge visibility toggle (publish / hide) in admin panel
+- [x] Challenge visibility toggle (slider) in admin panel — player view syncs immediately
+- [x] Challenge edit modal in admin panel (title, category, points, description, flag, visibility)
+- [x] New challenges default to hidden; visibility opt-in at creation via toggle
+- [x] New challenges default to case-insensitive flag matching
+- [x] Challenge description renders URLs as clickable hyperlinks (open in new tab)
 - [x] Frontend layout aligned with specification mockups (§12)
 - [x] Brand icon in header
 

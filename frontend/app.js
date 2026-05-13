@@ -250,6 +250,7 @@ function renderChallenges() {
 function filteredChallenges() {
   const query = state.query.trim().toLowerCase();
   return state.challenges.filter((challenge) => {
+    if (challenge.solved_by_team) return false;
     const categoryMatch = state.selectedCategory === 'all' || challenge.category === state.selectedCategory;
     const queryMatch = !query || challenge.title.toLowerCase().includes(query);
     return categoryMatch && queryMatch;
@@ -288,10 +289,10 @@ async function openChallenge(id) {
           <span>${challenge.solve_count} solves</span>
         </div>
         <p class="description">${renderDescription(challenge.description)}</p>
-        <div class="file-list">${(detail.files || []).map(fileLink).join('') || '<p class="muted">No files attached.</p>'}</div>
-        <div class="hint-list">${(detail.hints || []).map((hint) => hintRow(challenge.id, hint)).join('') || '<p class="muted">No hints available.</p>'}</div>
+        ${detail.files?.length ? `<div class="file-list">${detail.files.map(fileLink).join('')}</div>` : ''}
+        ${detail.hints?.length ? `<div class="hint-list">${detail.hints.map((hint) => hintRow(challenge.id, hint)).join('')}</div>` : ''}
         <form id="flag-form" class="flag-form">
-          <input id="flag-input" placeholder="feralctf{...}" autocomplete="off" required>
+          <input id="flag-input" placeholder="FLAG{...}" autocomplete="off" required>
           <button type="submit">Submit Flag</button>
         </form>
       </div>
@@ -431,6 +432,8 @@ async function renderProfile() {
   }
   const teamScore = state.scoreboard.teams.find((team) => team.team_id === state.user.team_id);
   const solves = state.profile ? state.profile.solve_history : [];
+  const inviteCode = state.profile?.team?.invite_code || '';
+
   view.innerHTML = `
     <section class="profile">
       <div class="avatar">${escapeHtml(state.user.username.slice(0, 1).toUpperCase())}</div>
@@ -446,11 +449,84 @@ async function renderProfile() {
         <div><strong>0</strong><span>first bloods</span></div>
       </div>
     </section>
+    ${!state.user.team_id ? `
+      <section class="panel">
+        <h2>Join or Create a Team</h2>
+        <div class="team-setup">
+          <form id="create-team-form" class="admin-form">
+            <h3>Create Team</h3>
+            <input name="team_name" placeholder="team name" required>
+            <button type="submit">Create</button>
+          </form>
+          <form id="join-team-form" class="admin-form">
+            <h3>Join Team</h3>
+            <input name="invite_code" placeholder="invite code" required>
+            <button type="submit">Join</button>
+          </form>
+        </div>
+      </section>
+    ` : `
+      <section class="panel">
+        <h2>Team</h2>
+        <div class="invite-row">
+          <span class="muted">Invite Code</span>
+          <code class="invite-code">${escapeHtml(inviteCode)}</code>
+          <button type="button" id="copy-invite-btn">Copy</button>
+        </div>
+      </section>
+    `}
     <section class="panel">
       <h2>Solve History</h2>
       <div class="history">${solves.map(solveRow).join('') || '<p class="muted">No solves yet.</p>'}</div>
     </section>
   `;
+
+  if (!state.user.team_id) {
+    document.getElementById('create-team-form').addEventListener('submit', createTeam);
+    document.getElementById('join-team-form').addEventListener('submit', joinTeam);
+  } else if (inviteCode) {
+    document.getElementById('copy-invite-btn').addEventListener('click', () => {
+      navigator.clipboard.writeText(inviteCode).then(() => toast('invite code copied'));
+    });
+  }
+}
+
+async function createTeam(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  try {
+    await api('/api/teams', {
+      method: 'POST',
+      body: JSON.stringify({ name: data.team_name.trim() }),
+    });
+    state.user = await api('/api/auth/me');
+    state.profile = null;
+    await Promise.all([loadChallenges(), loadScoreboard()]);
+    updateAuth();
+    renderProfile();
+    toast('team created');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+async function joinTeam(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  try {
+    await api('/api/teams/join', {
+      method: 'POST',
+      body: JSON.stringify({ invite_code: data.invite_code.trim() }),
+    });
+    state.user = await api('/api/auth/me');
+    state.profile = null;
+    await Promise.all([loadChallenges(), loadScoreboard()]);
+    updateAuth();
+    renderProfile();
+    toast('joined team');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
 function solveRow(solve) {
@@ -589,6 +665,7 @@ async function toggleChallengeVisibility(id, isHidden) {
       method: 'PUT',
       body: JSON.stringify({ is_hidden: isHidden }),
     });
+    await loadChallenges();
     renderAdminChallenges();
   } catch (error) {
     toast(error.message, 'error');
@@ -607,7 +684,7 @@ async function createChallenge(event) {
         description: data.description || '',
         flag: data.flag,
         flag_type: 'static',
-        flag_case_sensitive: true,
+        flag_case_sensitive: false,
         points: Number(data.points),
         max_points: Number(data.points),
         min_points: Math.max(1, Math.floor(Number(data.points) / 5)),

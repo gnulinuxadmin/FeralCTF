@@ -1,5 +1,4 @@
 use crate::{db::DbConn, errors::AppError};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,13 +81,7 @@ impl Team {
 }
 
 fn generate_invite_code() -> String {
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut bytes = [0u8; 8];
-    rand::rng().fill_bytes(&mut bytes);
-    bytes
-        .iter()
-        .map(|&b| CHARSET[(b as usize) % CHARSET.len()] as char)
-        .collect()
+    uuid::Uuid::new_v4().to_string()
 }
 
 #[cfg(test)]
@@ -114,7 +107,7 @@ mod tests {
         let team = Team::create(&conn, "Blue Team").unwrap();
 
         assert_eq!(team.name, "Blue Team");
-        assert_eq!(team.invite_code.len(), 8);
+        assert_eq!(team.invite_code.len(), 36);
         assert_eq!(
             Team::find_by_invite_code(&conn, &team.invite_code)
                 .unwrap()

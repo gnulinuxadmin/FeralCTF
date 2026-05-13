@@ -285,6 +285,16 @@ responses. Release binary is self-contained.
 - Scoreboard medals, progress bar, current-team highlight
 - Brand icon (`feral10.jpg`) in topbar
 - CSS layout — topbar grid, nav pill styles, admin sidebar, card grid updated to match §12 mockups
+- Teamless users can browse challenges — `list_challenges` / `get_challenge` use `unwrap_or(0)` instead of `require_team_id()`
+- Challenge edit modal — `openEditChallengeModal()` / `updateChallenge()` in `frontend/app.js`;
+  Edit button in each admin challenge row
+- New challenge defaults — `is_hidden: true` and `flag_case_sensitive: false`
+- Visibility toggle syncs player view immediately — `toggleChallengeVisibility()` awaits `loadChallenges()`
+- `renderDescription()` — renders URLs as `<a target="_blank" rel="noopener noreferrer">` hyperlinks in challenge modal
+- Description textarea — `rows="6"`, `min-height: 120px`, `resize: vertical` on create and edit forms
+- Flag input placeholder changed from `feralctf{...}` to `FLAG{...}`
+- Empty section messages removed — "No files attached." / "No hints available." no longer shown in challenge modal
+- Architecture spec duplicate `rusqlite` row fixed in `FeralCTF_Architecture_Spec_v2.docx` §2.1; PDF regenerated
 
 **Done when:** `cargo test` passes (50/50). All features exercised in browser.
 

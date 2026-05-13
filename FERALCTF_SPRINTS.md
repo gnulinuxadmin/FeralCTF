@@ -1247,6 +1247,42 @@ no new sprint scope is required.
 - **Route wiring** — `src/routes.rs` wires `list_admin_challenges` on `GET /api/admin/challenges`
   (previously only `POST` was registered on that path).
 
+### Bug Fixes + Polish (post-rc5)
+
+#### Backend fixes
+
+- **Teamless users can browse challenges** — `list_challenges` and `get_challenge` in
+  `src/handlers/challenges.rs` previously called `require_team_id()`, returning HTTP 400 for any
+  user without a team (including fresh admin accounts). Both handlers now use
+  `user.team_id.unwrap_or(0)`; team 0 never exists so `solved_by_team` is always `false` for
+  teamless users, which is correct.
+
+#### Frontend fixes
+
+- **Challenge edit modal** — `openEditChallengeModal(challenge)` and `updateChallenge(event, id)`
+  added to `frontend/app.js`. An Edit button appears in each admin challenge row. The modal
+  pre-fills title, category, points, description, and visibility. Flag field is optional (blank
+  keeps the existing hash). Calls `PUT /api/admin/challenges/{id}`.
+- **New challenge defaults** — `createChallenge` sends `is_hidden: true` by default (hidden until
+  published) and `flag_case_sensitive: false` (case-insensitive) by default.
+- **Visibility toggle sync** — `toggleChallengeVisibility()` now awaits `loadChallenges()` before
+  re-rendering, so the player challenge view updates immediately without a page refresh.
+- **URL rendering in descriptions** — `renderDescription(text)` escapes non-URL content and wraps
+  `https?://…` patterns in `<a href="…" target="_blank" rel="noopener noreferrer">` links.
+  Used in the challenge detail modal.
+- **Description textarea** — `rows="6"` and `min-height: 120px; resize: vertical` applied to both
+  create and edit forms.
+- **Flag input placeholder** — changed from `feralctf{...}` to `FLAG{...}`.
+- **Empty section messages removed** — "No files attached." and "No hints available." placeholder
+  text removed from the challenge detail modal; empty lists render nothing.
+
+#### Documentation
+
+- **Architecture spec duplicate row** — `FeralCTF_Architecture_Spec_v2.docx` section 2.1 had two
+  `rusqlite` rows (version 0.7.x and 0.31.x with inaccurate descriptions). Both merged into one
+  correct row (`rusqlite 0.32.x / SQLite queries, migrations, backup`). PDF regenerated from the
+  patched docx via LibreOffice headless.
+
 ---
 
 *End of sprint definitions.*
