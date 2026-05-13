@@ -1235,7 +1235,7 @@ no new sprint scope is required.
   difficulty dot, category color, solve count, and solved marker.
 - **Category filter pills** — `.cat-pill` buttons replace the old category `<select>` element.
 - **Scoreboard polish** — rank medals (🥇🥈🥉), progress bar, current-team highlight.
-- **Brand icon** — `feral10.jpg` (pixel-art squirrel) rendered in the topbar via `.brand-icon`.
+- **Brand icon** — `images/feral10.jpg` (pixel-art squirrel) rendered in the topbar via `.brand-icon`.
 - **Layout** — topbar, nav, auth-form, user-info, admin sidebar, and card grid CSS updated to
   match the §12 specification mockups.
 

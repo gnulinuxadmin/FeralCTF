@@ -1,6 +1,6 @@
 # FeralCTF — Technical Specification v1.0
 
-![FeralCTF logo](feral10.jpg)
+![FeralCTF logo](images/feral10.jpg)
 
 > **Purpose of this document:** Complete implementation specification for the FeralCTF platform.
 > Intended readers: human collaborators, AI coding agents (e.g. Qwen, OpenCode).

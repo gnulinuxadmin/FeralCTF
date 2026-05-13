@@ -283,7 +283,7 @@ responses. Release binary is self-contained.
 - Challenge card layout — `.card-top / .card-bottom`, difficulty dot, category color, solve count
 - Category filter pills replacing `<select>` element
 - Scoreboard medals, progress bar, current-team highlight
-- Brand icon (`feral10.jpg`) in topbar
+- Brand icon (`images/feral10.jpg`) in topbar
 - CSS layout — topbar grid, nav pill styles, admin sidebar, card grid updated to match §12 mockups
 - Teamless users can browse challenges — `list_challenges` / `get_challenge` use `unwrap_or(0)` instead of `require_team_id()`
 - Challenge edit modal — `openEditChallengeModal()` / `updateChallenge()` in `frontend/app.js`;
