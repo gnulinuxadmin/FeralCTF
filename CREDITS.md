@@ -32,7 +32,7 @@ the author of working and occasionally poignant code.
 <img src="https://github.com/gnulinuxadmin/FeralCTF/blob/main/gpt.jpg?raw=true"
 width="250" height="250" alt="ChatGPT" />
 
-**Syntheic Intelligence and Digital Bug Annihilator.**
+**Synthetic Intelligence and Digital Bug Annihilator.**
 
 Major debugging and quality assurance stormtrooper,
 writer of some pretty elegant fixes and doc updates.
