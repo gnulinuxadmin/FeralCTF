@@ -11,6 +11,8 @@ database server, or a separate frontend build pipeline.
 
 For deep technical details, see [FERALCTF_SPEC.md](FERALCTF_SPEC.md).
 
+![FeralCTF screen shot of challenges](screenshots/Screenshot_20260513_014426.png)
+
 ## Status
 
 Current release: **1.0rc5** — all core sprints complete. Feature-complete for small-to-medium competitions;
