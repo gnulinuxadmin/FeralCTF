@@ -1,4 +1,6 @@
 /target
 *.db
+*.db-shm
+*.db-wal
 frontend/dist
 config.toml

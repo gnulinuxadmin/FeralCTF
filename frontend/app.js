@@ -36,12 +36,12 @@ function renderShell() {
         <button data-view="challenges">Challenges</button>
         <button data-view="scoreboard">Scoreboard</button>
         <button data-view="profile">Profile</button>
-        <button data-view="admin">Admin</button>
       </nav>
       <form id="auth-form" class="auth-form">
         <input id="auth-username" autocomplete="username" placeholder="username">
         <input id="auth-password" autocomplete="current-password" type="password" placeholder="password">
         <button type="submit">Login</button>
+        <button type="button" id="show-register-btn">Register</button>
       </form>
     </header>
     <main id="view"></main>
@@ -53,6 +53,7 @@ function renderShell() {
     button.addEventListener('click', () => navigate(button.dataset.view));
   });
   document.getElementById('auth-form').addEventListener('submit', loginUser);
+  document.getElementById('show-register-btn').addEventListener('click', showRegisterModal);
 }
 
 async function loadSession() {
@@ -78,6 +79,23 @@ function updateAuth() {
       <button type="button" id="logout-button">Logout</button>
     `;
     document.getElementById('logout-button').addEventListener('click', logoutUser);
+  }
+  updateAdminNav();
+}
+
+function updateAdminNav() {
+  const nav = document.querySelector('nav.nav');
+  if (!nav) return;
+  const existing = nav.querySelector('[data-view="admin"]');
+  const isAdmin = state.user && state.user.role === 'admin';
+  if (isAdmin && !existing) {
+    const btn = document.createElement('button');
+    btn.dataset.view = 'admin';
+    btn.textContent = 'Admin';
+    btn.addEventListener('click', () => navigate('admin'));
+    nav.appendChild(btn);
+  } else if (!isAdmin && existing) {
+    existing.remove();
   }
 }
 
@@ -113,6 +131,54 @@ async function logoutUser() {
   sessionStorage.removeItem('feralctf_token');
   renderShell();
   navigate('challenges');
+}
+
+function showRegisterModal() {
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `
+    <div class="modal-panel">
+      <button class="modal-close" type="button" aria-label="Close">x</button>
+      <h2>Register</h2>
+      <form id="register-form" class="admin-form">
+        <input name="username" autocomplete="username" placeholder="username" required>
+        <input name="password" type="password" autocomplete="new-password" placeholder="password (min 8 chars)" required>
+        <input name="team_name" placeholder="new team name (optional)">
+        <input name="invite_code" placeholder="team invite code (optional)">
+        <button type="submit">Register</button>
+      </form>
+    </div>
+  `;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.querySelector('.modal-close').addEventListener('click', closeModal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeModal();
+  }, { once: true });
+  modal.querySelector('#register-form').addEventListener('submit', registerUser);
+}
+
+async function registerUser(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  const body = { username: data.username, password: data.password };
+  if (data.team_name.trim()) body.team_name = data.team_name.trim();
+  if (data.invite_code.trim()) body.invite_code = data.invite_code.trim();
+  try {
+    const result = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    state.token = result.token;
+    state.user = result.user;
+    sessionStorage.setItem('feralctf_token', result.token);
+    closeModal();
+    updateAuth();
+    await Promise.all([loadChallenges(), loadScoreboard()]);
+    renderCurrent();
+    toast('account created');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
 function navigate(view) {

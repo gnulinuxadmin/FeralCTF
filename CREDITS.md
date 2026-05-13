@@ -27,6 +27,16 @@ and acorns that uses tokens on a RTX 4060 like electricity is free.
 Bangs out features that may work or may catch fire but sometimes
 the author of working and occasionally poignant code.
 
+## ChatGPT
+
+<img src="https://github.com/gnulinuxadmin/FeralCTF/blob/main/gpt.jpg?raw=true"
+width="250" height="250" alt="ChatGPT" />
+
+**Syntheic Intelligence and Digital Bug Annihilator.**
+
+Major debugging and quality assurance stormtrooper,
+writer of some pretty elegant fixes and doc updates.
+
 ## Claude Sonnet
 
 <img src="https://github.com/gnulinuxadmin/FeralCTF/blob/main/cleanup.jpg?raw=true"

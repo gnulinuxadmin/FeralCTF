@@ -123,23 +123,62 @@ async fn security_headers(request: Request, next: Next) -> Response {
 }
 
 async fn frontend(uri: Uri) -> Response {
-    // FERALCTF_SPEC.md §1.4: the vanilla JS SPA is embedded in the binary.
-    // Non-API paths fall back to index.html so browser-side routing works.
     let path = uri.path().trim_start_matches('/');
     if path.starts_with("api/") || path == "ws" {
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let asset_path = if path.is_empty() { "index.html" } else { path };
-    asset_response(asset_path).unwrap_or_else(|| {
-        asset_response("index.html").unwrap_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "embedded frontend index.html is missing",
-            )
-                .into_response()
-        })
-    })
+    if path.is_empty() {
+        return asset_response("index.html").unwrap_or_else(|| {
+            (StatusCode::INTERNAL_SERVER_ERROR, "frontend missing").into_response()
+        });
+    }
+
+    asset_response(path)
+        .unwrap_or_else(|| error_page(StatusCode::NOT_FOUND, uri.path()))
+}
+
+fn error_page(status: StatusCode, path: &str) -> Response {
+    let code = status.as_u16();
+    let reason = status.canonical_reason().unwrap_or("error");
+    let safe_path = path
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FeralCTF — {code}</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <h1>FeralCTF</h1>
+        <p class="muted">terminal capture console</p>
+      </div>
+    </header>
+    <main style="display:flex;align-items:center;justify-content:center;padding:4rem 1rem">
+      <section class="panel" style="text-align:center;max-width:480px">
+        <p class="muted" style="font-size:3rem;margin:0">{code}</p>
+        <h2 style="margin:.5rem 0 1rem">{reason}</h2>
+        <p class="muted"><code>{safe_path}</code> does not exist</p>
+        <a href="/" style="display:inline-block;margin-top:1.5rem">← back to terminal</a>
+      </section>
+    </main>
+  </div>
+</body>
+</html>"#
+    );
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+        .body(Body::from(html))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 fn asset_response(path: &str) -> Option<Response> {
