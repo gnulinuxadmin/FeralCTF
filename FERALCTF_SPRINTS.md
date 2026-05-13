@@ -1,6 +1,7 @@
 # FeralCTF — Implementation Sprints
 
 > **Instructions for agents receiving these sprints:**
+>
 > - Read the entire sprint before writing any code.
 > - Do not modify `SPEC.md` — it is immutable. If the spec conflicts with your assumptions, the spec wins.
 > - Do not add dependencies not listed in `Cargo.toml`.
@@ -17,10 +18,12 @@
 **Goal:** Clean directory structure, compiling skeleton, no logic.
 
 **Inputs:**
+
 - `Cargo.toml` (provided, do not modify)
 
 **Outputs — create these files with stub content that compiles:**
-```
+
+```text
 src/main.rs
 src/config.rs
 src/errors.rs
@@ -49,12 +52,14 @@ migrations/001_initial.sql
 ```
 
 **Rules:**
+
 - `main.rs` must compile with `cargo check` — stubs only, no logic
 - Every module must be declared in its parent `mod.rs`
 - `frontend/` files can be empty placeholders
 - `migrations/001_initial.sql` must contain the full schema (see Sprint 1)
 
 **Acceptance criteria:**
+
 - `cargo check` passes with zero errors
 - `cargo check` passes with zero warnings (use `#[allow(dead_code)]` on stubs if needed)
 
@@ -65,6 +70,7 @@ migrations/001_initial.sql
 **Goal:** SQLite database layer. Schema, migrations, connection pool, helper traits.
 
 **Inputs:**
+
 - `src/db/mod.rs` (stub from Sprint 0)
 - `migrations/001_initial.sql` (stub from Sprint 0)
 
@@ -209,6 +215,7 @@ pub fn run_migrations(conn: &rusqlite::Connection) -> Result<(), anyhow::Error>
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Pool initializes and WAL pragma is set on connection open
 - Migration is idempotent (running twice does not error)
@@ -298,6 +305,7 @@ pub fn generate_example(path: &str) -> Result<(), anyhow::Error>
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Loads from file, falls back to defaults if file missing
 - Env var `FERALCTF_SERVER_PORT=9999` overrides port
@@ -374,6 +382,7 @@ pub enum AppError {
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Unit test: hash and verify a password round-trips correctly
 - Unit test: wrong password returns false, not error
@@ -388,6 +397,7 @@ pub enum AppError {
 **Goal:** Rust structs for all database entities. No handlers yet.
 
 **Implement in `src/models/user.rs`:**
+
 ```rust
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct User {
@@ -441,6 +451,7 @@ impl User {
 ```
 
 **Implement in `src/models/team.rs`:**
+
 ```rust
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Team {
@@ -463,6 +474,7 @@ impl Team {
 ```
 
 **Implement in `src/models/challenge.rs`:**
+
 ```rust
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Challenge { /* all DB fields */ }
@@ -527,6 +539,7 @@ impl Challenge {
 ```
 
 **Implement in `src/models/scoreboard.rs`:**
+
 ```rust
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TeamScore {
@@ -552,6 +565,7 @@ impl ScoreboardState {
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes with zero errors
 - All DB helper methods use parameterized queries (no string interpolation)
 - `ChallengePublic` never exposes `flag_hash` or `flag_salt`
@@ -564,7 +578,7 @@ impl ScoreboardState {
 
 **Implement in `src/handlers/auth.rs`:**
 
-```
+```text
 POST /api/auth/register
 POST /api/auth/login
 POST /api/auth/logout
@@ -573,6 +587,7 @@ PUT  /api/auth/password
 ```
 
 **Rules:**
+
 - Extract JWT from `Authorization: Bearer <token>` header
 - On register: if no other users exist, set role = "admin"
 - On register: validate username (3-32 chars, alphanumeric + underscore + hyphen)
@@ -584,6 +599,7 @@ PUT  /api/auth/password
 - Use `axum::extract::State<AppState>` for shared state
 
 **AppState — define in `src/main.rs`:**
+
 ```rust
 #[derive(Clone)]
 pub struct AppState {
@@ -594,6 +610,7 @@ pub struct AppState {
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - First registered user gets role = "admin"
 - Login with wrong password returns 401
@@ -608,7 +625,7 @@ pub struct AppState {
 
 **Implement in `src/handlers/challenges.rs`:**
 
-```
+```text
 GET  /api/challenges                     -> Vec<ChallengePublic>
 GET  /api/challenges/:id                 -> ChallengePublic + hints + files
 POST /api/challenges/:id/submit          -> SubmitResponse
@@ -616,6 +633,7 @@ POST /api/challenges/:id/hints/:hid/unlock -> HintUnlockResponse
 ```
 
 **Flag submission rules:**
+
 - Strip leading/trailing whitespace from submitted flag
 - Max length 256 chars
 - Hash and compare: `hash_flag(submitted, challenge.flag_salt) == challenge.flag_hash`
@@ -627,6 +645,7 @@ POST /api/challenges/:id/hints/:hid/unlock -> HintUnlockResponse
 - Return `SubmitResponse { correct, points_earned, first_blood, new_score }`
 
 **Rate limiting — use `src/anticheat.rs`:**
+
 ```rust
 // Call before processing submission:
 pub fn check_rate_limit(state: &AppState, team_id: i64, ip: &str)
@@ -636,6 +655,7 @@ pub fn check_rate_limit(state: &AppState, team_id: i64, ip: &str)
 ```
 
 **Implement in `src/scoring.rs`:**
+
 ```rust
 pub fn dynamic_points(max_points: i64, min_points: i64, decay_rate: i64, solves: i64) -> i64 {
     // points = max(min_points, ceil(max_points - decay_rate * (solves - 1)^2))
@@ -648,6 +668,7 @@ pub fn recalculate_challenge_points(conn: &DbConn, challenge_id: i64) -> Result<
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Correct flag returns 200 with `correct: true`
 - Wrong flag returns 200 with `correct: false` (not 4xx)
@@ -663,6 +684,7 @@ pub fn recalculate_challenge_points(conn: &DbConn, challenge_id: i64) -> Result<
 **Goal:** Scoreboard endpoint served from in-process cache. Score graph data.
 
 **Implement in `src/cache.rs`:**
+
 ```rust
 pub struct AppCache {
     pub scoreboard: RwLock<Option<ScoreboardState>>,
@@ -685,7 +707,8 @@ impl AppCache {
 ```
 
 **Implement in `src/handlers/scoreboard.rs`:**
-```
+
+```text
 GET /api/scoreboard        -> ScoreboardState (from cache)
 GET /api/scoreboard/graph  -> Vec<TeamGraphData>
 GET /api/teams/:id         -> TeamProfile
@@ -694,6 +717,7 @@ POST /api/teams/join       -> Team (join by invite_code)
 ```
 
 **TeamGraphData:**
+
 ```rust
 pub struct TeamGraphData {
     pub team_id: i64,
@@ -703,12 +727,14 @@ pub struct TeamGraphData {
 ```
 
 **Background task — start in `main.rs`:**
+
 ```rust
 // Spawn a Tokio task that records score snapshots every 5 minutes:
 // INSERT INTO score_history (team_id, score, recorded_at) for all teams
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Scoreboard is served from cache (not a fresh DB query on every request)
 - Cache is invalidated when Sprint 6 records a correct submission
@@ -770,6 +796,7 @@ pub async fn ws_handler(
 ```
 
 **Wire into AppState:**
+
 ```rust
 pub struct AppState {
     pub db: DbPool,
@@ -780,10 +807,12 @@ pub struct AppState {
 ```
 
 **Wire broadcast calls:**
+
 - In Sprint 6 flag submission handler: broadcast `WsEvent::NewSolve` on correct submission
 - In Sprint 6 flag submission handler: broadcast `WsEvent::ScoreUpdate` after score recalculation
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Client connecting to `/ws` receives a ping every 30s
 - Correct flag submission triggers a broadcast visible to all connected clients
@@ -798,13 +827,15 @@ pub struct AppState {
 **Implement in `src/handlers/admin.rs`:**
 
 **Middleware — apply to all /api/admin/* routes:**
+
 ```rust
 // Extract JWT, verify role == "admin", else return 403
 pub async fn require_admin(/* ... */) -> Result<Next, AppError>
 ```
 
 **Challenge CRUD:**
-```
+
+```text
 POST   /api/admin/challenges          CreateChallengeRequest -> Challenge
 PUT    /api/admin/challenges/:id      UpdateChallengeRequest -> Challenge
 DELETE /api/admin/challenges/:id      -> { deleted: true }
@@ -833,13 +864,15 @@ pub struct CreateChallengeRequest {
 ```
 
 **Submission log:**
-```
+
+```text
 GET /api/admin/submissions?team_id=&challenge_id=&correct=&page=&per_page=
 -> PaginatedSubmissions
 ```
 
 **User + team management:**
-```
+
+```text
 GET    /api/admin/users                -> Vec<UserPublic>
 POST   /api/admin/users/:id/ban        -> { banned: true }
 GET    /api/admin/teams                -> Vec<Team>
@@ -848,7 +881,8 @@ POST   /api/admin/teams/:id/disqualify -> { disqualified: true }
 ```
 
 **Competition controls:**
-```
+
+```text
 POST /api/admin/competition/start   -> { started: true }
 POST /api/admin/competition/end     -> { ended: true }
 POST /api/admin/competition/freeze  -> { frozen: true }
@@ -859,7 +893,8 @@ POST /api/admin/announce            -> { sent: true }
 ```
 
 **Backup:**
-```
+
+```text
 GET /api/admin/backup
 // Streams the raw SQLite file as application/octet-stream
 // Filename: feralctf-backup-{timestamp}.db
@@ -867,6 +902,7 @@ GET /api/admin/backup
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Non-admin JWT returns 403 on all /api/admin/* routes
 - Challenge creation hashes flag before DB insert (verify flag_hash != plaintext)
@@ -882,6 +918,7 @@ GET /api/admin/backup
 **Implement in `src/import_export.rs`:**
 
 **Export:**
+
 ```rust
 pub struct ExportBundle {
     pub feralctf_export_version: u32,   // always 1
@@ -916,6 +953,7 @@ pub fn export(conn: &DbConn, config: &Config, inline_attachments: bool)
 ```
 
 **Import:**
+
 ```rust
 pub struct ImportOptions {
     pub overwrite: bool,
@@ -951,7 +989,8 @@ pub fn detect_and_convert_ctfd(raw: &[u8]) -> Result<ExportBundle, AppError>
 ```
 
 **Endpoints — add to `src/handlers/admin.rs`:**
-```
+
+```text
 GET  /api/admin/export                      -> JSON download
 GET  /api/admin/export?attachments=inline   -> JSON with base64 files
 GET  /api/admin/export?attachments=zip      -> JSON + ZIP (multipart or separate endpoint)
@@ -960,11 +999,13 @@ POST /api/admin/import?dry_run=true         -> ImportResult (no DB writes)
 ```
 
 **CLI subcommand — add to `src/main.rs`:**
-```
+
+```bash
 feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - Export then import round-trips all challenge data without loss
 - Import is idempotent (running twice with same bundle produces same DB state)
@@ -1022,12 +1063,14 @@ pub fn check_flag_sharing(
 ```
 
 **Wire up:**
+
 - Add `RateLimiter` to `AppState`
 - Call `check_submission()` at start of flag submission handler (Sprint 6)
 - Call `record_attempt()` after each submission
 - Spawn background GC task in `main.rs` (every 60s)
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - 11th submission in 60s returns 429 with `Retry-After` header
 - Exponential backoff doubles wait time on each wrong attempt past threshold
@@ -1041,7 +1084,8 @@ pub fn check_flag_sharing(
 **Goal:** Vanilla JS single-page application embedded into the binary.
 
 **Files:**
-```
+
+```text
 frontend/index.html
 frontend/app.js
 frontend/style.css
@@ -1068,6 +1112,7 @@ frontend/style.css
    Settings: competition name, times, toggles for team mode / dynamic scoring / score freeze.
 
 **Design constraints:**
+
 - Dark terminal aesthetic: background `#0a0e1a`, accent `#63d28c`, font `'Courier New', monospace`
 - No external CDN dependencies — all JS/CSS inline in the files
 - No frameworks (no React, Vue, jQuery)
@@ -1076,6 +1121,7 @@ frontend/style.css
 - All API calls use `fetch()` with `Authorization: Bearer <token>` header
 
 **Embed in binary — add to `src/main.rs`:**
+
 ```rust
 #[derive(rust_embed::Embed)]
 #[folder = "frontend/"]
@@ -1086,6 +1132,7 @@ struct FrontendAssets;
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - `cargo build` produces a single binary with frontend embedded
 - Navigating to `/` in a browser shows the challenges view
@@ -1100,7 +1147,7 @@ struct FrontendAssets;
 
 **CLI — implement in `src/main.rs` using `std::env::args`:**
 
-```
+```bash
 feralctf                          # start server (default)
 feralctf --port 8080              # start server on port
 feralctf --config /path/config.toml  # start with config file
@@ -1113,7 +1160,8 @@ feralctf import <file> --attachments <dir>
 ```
 
 **Security headers — add Tower middleware layer:**
-```
+
+```text
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: strict-origin-when-cross-origin
@@ -1121,12 +1169,14 @@ Content-Security-Policy: default-src 'self'; connect-src 'self' ws: wss:
 ```
 
 **CORS — configure tower-http CorsLayer:**
+
 ```rust
 // Default: same-origin only
 // Configurable via config.toml [server] allowed_origins field
 ```
 
 **Admin audit log — add to `src/db/mod.rs`:**
+
 ```sql
 CREATE TABLE IF NOT EXISTS audit_log (
     id         INTEGER PRIMARY KEY,
@@ -1138,6 +1188,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at INTEGER NOT NULL
 );
 ```
+
 ```rust
 pub fn audit(conn: &DbConn, user_id: i64, action: &str, target: Option<&str>,
              detail: Option<&str>, ip: Option<&str>) -> Result<(), AppError>
@@ -1145,13 +1196,15 @@ pub fn audit(conn: &DbConn, user_id: i64, action: &str, target: Option<&str>,
 ```
 
 **`feralctf init` output:**
-```
+
+```text
 config.toml          (generated with all defaults + random jwt_secret)
 ctf.db               (empty database with schema applied)
 attachments/         (empty directory)
 ```
 
 **Acceptance criteria:**
+
 - `cargo check` passes
 - `cargo build --release` produces a single binary
 - `./feralctf init` creates all three files/dirs

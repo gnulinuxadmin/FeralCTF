@@ -11,6 +11,7 @@
 **Goal:** Compilable skeleton. No logic. Structure only.
 
 **Tasks:**
+
 - Create all source files listed in SPEC section 9.3
 - Declare all modules in their parent mod.rs
 - Create empty frontend/ placeholder files
@@ -25,6 +26,7 @@
 **Goal:** SQLite layer up and running.
 
 **Tasks:**
+
 - Write `migrations/001_initial.sql` — full schema per SPEC section 3.1
 - Implement `db::init_pool()` — r2d2 + r2d2_sqlite, WAL mode on connect
 - Implement `db::run_migrations()` — idempotent, safe to re-run
@@ -39,6 +41,7 @@
 **Goal:** Load config.toml, env var overrides, sane defaults.
 
 **Tasks:**
+
 - Implement all Config structs per SPEC section 7
 - Implement `config::load()` — file → defaults → env var overrides
 - Auto-generate jwt_secret if empty
@@ -55,6 +58,7 @@
 **Goal:** Password hashing, JWT, session management, unified error type.
 
 **Tasks:**
+
 - Implement `AppError` in errors.rs — all variants per SPEC section 4, implements `IntoResponse`
 - Implement `auth::hash_password()` and `auth::verify_password()` — Argon2id
 - Implement `auth::hash_flag()` and `auth::verify_flag()` — sha256 + salt, case-insensitive
@@ -71,6 +75,7 @@
 **Goal:** Rust structs for all DB entities with DB helper methods.
 
 **Tasks:**
+
 - Implement User, RegisterRequest, LoginRequest, LoginResponse, UserPublic in models/user.rs
 - Implement Team in models/team.rs — invite_code is random 8-char alphanumeric
 - Implement Challenge, ChallengePublic, Hint, ChallengeFile, Submission in models/challenge.rs
@@ -87,6 +92,7 @@
 **Goal:** Registration, login, logout, /me, password change endpoints.
 
 **Tasks:**
+
 - Define AppState in main.rs (db, config, cache stub, ws_hub stub)
 - Implement POST /api/auth/register — first user becomes admin, validate username + password
 - Implement POST /api/auth/login — verify password, create session, return JWT
@@ -104,6 +110,7 @@
 **Goal:** Challenge browsing and flag submission working end to end.
 
 **Tasks:**
+
 - Implement GET /api/challenges — list visible challenges with per-team solve status
 - Implement GET /api/challenges/:id — detail, hints (unlocked content only), files
 - Implement POST /api/challenges/:id/submit — per SPEC section 4.2 and 6.5
@@ -123,6 +130,7 @@
 **Goal:** Cached scoreboard endpoint and score graph data.
 
 **Tasks:**
+
 - Implement AppCache in cache.rs — RwLock-wrapped scoreboard and challenge list
 - Implement `get_or_build_scoreboard()` and `get_or_build_challenges()`
 - Implement cache invalidation methods
@@ -143,6 +151,7 @@
 **Goal:** Real-time event broadcast to all connected clients.
 
 **Tasks:**
+
 - Define WsEvent enum — NewSolve, Announcement, StateChange, ScoreUpdate
 - Implement WsHub with tokio::sync::broadcast channel (capacity 256)
 - Implement GET /ws upgrade handler — subscribe, forward events as JSON text frames
@@ -159,6 +168,7 @@
 **Goal:** Admin CRUD, competition controls, backup.
 
 **Tasks:**
+
 - Implement require_admin middleware — checks JWT role, returns 403 if not admin
 - Implement POST/PUT/DELETE /api/admin/challenges — slug auto-generated, flag hashed before storage
 - Implement GET /api/admin/submissions — paginated, filterable
@@ -178,6 +188,7 @@
 **Goal:** Full game JSON export and import. CTFd compatibility.
 
 **Tasks:**
+
 - Define ExportBundle and all export structs per SPEC section 5.1
 - Implement `import_export::export()` — inline and zip attachment modes
 - Implement GET /api/admin/export endpoint
@@ -196,6 +207,7 @@
 **Goal:** Sliding window rate limit, exponential backoff, flag sharing detection.
 
 **Tasks:**
+
 - Implement RateLimiter struct in anticheat.rs — DashMap-backed, no DB required
 - Implement sliding window: N submissions per minute per team
 - Implement exponential backoff: doubles wait per wrong attempt past threshold
@@ -214,6 +226,7 @@
 **Goal:** Vanilla JS SPA embedded into binary via rust-embed.
 
 **Tasks:**
+
 - Implement Challenges view — card grid, category filter, search, solved markers, flag submit modal
 - Implement Scoreboard view — ranked table, progress bars, current team highlight, WS live updates
 - Implement Profile view — stats, solve history
@@ -224,7 +237,8 @@
 - Wire rust-embed into main.rs — serve frontend on all non-/api paths
 - Dark terminal theme per SPEC section 12.3
 
-**Done when:** cargo build produces single binary. / loads challenges view. Flag submit works in browser. Scoreboard updates live.
+**Done when:** cargo build produces single binary. `/` loads challenges view. Flag submit
+works in browser. Scoreboard updates live.
 
 ---
 
@@ -233,6 +247,7 @@
 **Goal:** CLI subcommands, security headers, audit log, release build.
 
 **Tasks:**
+
 - Implement `feralctf init` — generates config.toml, creates ctf.db, creates attachments/
 - Implement `feralctf migrate` — runs migrations on existing DB
 - Add HTTP security headers via Tower middleware — X-Content-Type-Options, X-Frame-Options, Referrer-Policy, CSP
@@ -243,8 +258,9 @@
 - Verify `cargo build --release` produces single binary under 20 MB
 - Verify RSS under 50 MB at idle
 
-**Done when:** `feralctf init` bootstraps a working install. Security headers present on all responses. Release binary is self-contained.
+**Done when:** `feralctf init` bootstraps a working install. Security headers present on all
+responses. Release binary is self-contained.
 
 ---
 
-*FeralCTF — Apache 2.0 · CyberSquirrels CTF Team*
+FeralCTF — Apache 2.0 · CyberSquirrels CTF Team

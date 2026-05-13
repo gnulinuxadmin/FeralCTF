@@ -4,7 +4,10 @@
   <img src="feral10.jpg" alt="FeralCTF logo" width="180">
 </p>
 
-FeralCTF is a lightweight, self-hosted Capture The Flag platform for academic, nonprofit, workshop, and small-to-medium competitions. It runs as one Rust binary with SQLite storage and embedded frontend assets. Production use does not require Node.js, Docker, an external database server, or a separate frontend build pipeline.
+FeralCTF is a lightweight, self-hosted Capture The Flag platform for academic, nonprofit,
+workshop, and small-to-medium competitions. It runs as one Rust binary with SQLite storage
+and embedded frontend assets. Production use does not require Node.js, Docker, an external
+database server, or a separate frontend build pipeline.
 
 For deep technical details, see [FERALCTF_SPEC.md](FERALCTF_SPEC.md).
 
@@ -64,7 +67,9 @@ feralctf import challenges.json --overwrite
 feralctf import challenges.json --attachments ./attachments
 ```
 
-The default command starts the server. `init` creates a local install. `migrate` applies embedded schema migrations. `import --dry-run` validates and previews a bundle without writing challenge rows.
+The default command starts the server. `init` creates a local install. `migrate` applies
+embedded schema migrations. `import --dry-run` validates and previews a bundle without
+writing challenge rows.
 
 ## Deployment
 
@@ -90,7 +95,8 @@ Operational notes:
 - Put production instances behind HTTPS.
 - Store attachments outside any public webroot.
 - Back up the SQLite database before and after major event milestones.
-- Existing static flags are stored as salted hashes and cannot be recovered as plaintext. FeralCTF-to-FeralCTF exports include verifier data so round-trips remain possible.
+- Existing static flags are stored as salted hashes and cannot be recovered as plaintext.
+  FeralCTF-to-FeralCTF exports include verifier data so round-trips remain possible.
 
 ## Configuration
 
@@ -152,6 +158,20 @@ Build a release binary:
 
 ```bash
 cargo build --release
+```
+
+The default release binary dynamically links against the host `libc`/`libm`/`libgcc_s`,
+which are present on all standard Linux distributions.
+
+### Static binary (musl)
+
+For minimal container images, airgapped environments, or deployments requiring a
+self-contained binary with no shared-library dependencies:
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+# binary: target/x86_64-unknown-linux-musl/release/feralctf
 ```
 
 Run locally during development:

@@ -150,7 +150,8 @@ Important Sprint 5 details:
 - Every flag submission is recorded in `submissions`.
 - Correct submissions insert `solves`, recalculate scores, invalidate the cache stub, and insert `score_history`.
 - Already-solved submissions return `correct: false` with message `"already solved"`.
-- `src/scoring.rs` implements `dynamic_points`, `recalculate_challenge_points`, and full team-score recalculation from solves minus hint deductions.
+- `src/scoring.rs` implements `dynamic_points`, `recalculate_challenge_points`, and full team-score recalculation from
+  solves minus hint deductions.
 - Sprint 6 originally used a placeholder anti-cheat hook; Sprint 11 replaced it with real `RateLimiter` enforcement.
 
 ### Sprint 7
@@ -178,7 +179,8 @@ Important Sprint 5 details:
 ### Sprint 9
 
 - `src/handlers/admin.rs` implements admin authorization and admin APIs.
-- Admin APIs include dashboard, challenge CRUD, submission log, users, teams, competition controls, announcements, and SQLite backup.
+- Admin APIs include dashboard, challenge CRUD, submission log, users, teams, competition controls, announcements, and
+  SQLite backup.
 - Admin routes are wired through `require_admin` middleware in `src/routes.rs`.
 - Challenge creation/update hashes static flags before storage and stores regex flags as patterns.
 - Backup uses SQLite backup API and returns a database download.
@@ -186,7 +188,8 @@ Important Sprint 5 details:
 ### Sprint 10
 
 - `src/import_export.rs` implements `ExportBundle`, `ExportChallenge`, `ImportOptions`, `ImportResult`, and preview structs.
-- `import_export::export()` exports competition metadata, categories, challenges, hints, files, tags, and slug-based unlock dependencies.
+- `import_export::export()` exports competition metadata, categories, challenges, hints, files, tags, and slug-based
+  unlock dependencies.
 - Inline attachment export uses base64 for stored files up to the Sprint 10 inline limit.
 - `import_export::import()` validates first, supports dry-run, creates/skips/overwrites by slug, and wraps writes in a transaction.
 - Import is idempotent for matching bundles.
@@ -197,14 +200,17 @@ Important Sprint 5 details:
   - `GET /api/admin/export` — JSON export
   - `GET /api/admin/export?attachments=inline` — JSON with base64 files
   - `GET /api/admin/export?attachments=zip` — ZIP containing challenges.json + attachment files
-  - `POST /api/admin/import` as multipart upload with `file`, `overwrite`, `dry_run`, and optional `attachments` (ZIP of challenge files extracted to `storage.attachments_path` before import; skipped for dry_run)
+  - `POST /api/admin/import` as multipart upload with `file`, `overwrite`, `dry_run`, and optional `attachments`
+    (ZIP of challenge files extracted to `storage.attachments_path` before import; skipped for dry_run)
 - CLI import command:
 
 ```bash
 feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 ```
 
-- Important caveat: the current schema stores static flags only as salted hashes, so existing static flags cannot be exported as plaintext. FeralCTF exports include verifier fields (`flag_hash`, `flag_salt`) to make FeralCTF-to-FeralCTF round-trips lossless. External/plaintext imports still hash flags before storage.
+- Important caveat: the current schema stores static flags only as salted hashes, so existing static flags cannot be
+  exported as plaintext. FeralCTF exports include verifier fields (`flag_hash`, `flag_salt`) to make FeralCTF-to-
+  FeralCTF round-trips lossless. External/plaintext imports still hash flags before storage.
 
 ### Sprint 11
 
@@ -218,21 +224,25 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - `AppState` owns `Arc<anticheat::RateLimiter>`.
 - `src/main.rs` now starts the Axum server, score snapshot task, and rate limiter GC task.
 - `spawn_rate_limiter_gc_task()` runs every 60 seconds and only cleans in-memory limiter state.
-- `check_flag_sharing()` detects the same correct submitted flag from another team inside `rate_limit.flag_sharing_window_seconds` and logs a warning only.
-- Sprint 11 decision: `migrations/001_initial.sql` includes `idx_submissions_flag_sharing` on `(challenge_id, flag, is_correct, submitted_at)` so flag-sharing detection can use a purpose-built index.
+- `check_flag_sharing()` detects the same correct submitted flag from another team inside
+  `rate_limit.flag_sharing_window_seconds` and logs a warning only.
+- Sprint 11 decision: `migrations/001_initial.sql` includes `idx_submissions_flag_sharing` on `(challenge_id, flag,
+  is_correct, submitted_at)` so flag-sharing detection can use a purpose-built index.
 
 ### Sprint 12
 
 - `frontend/index.html`, `frontend/app.js`, and `frontend/style.css` implement the vanilla JS SPA.
 - The SPA includes Challenges, Scoreboard, Profile, and Admin views.
-- Challenge cards support category filtering, title search, solved markers, solve counts, point display, and a difficulty dot.
+- Challenge cards support category filtering, title search, solved markers, solve counts, point display, and a
+  difficulty dot.
 - Challenge detail modals load from `GET /api/challenges/{id}`, show files and hints, and submit flags through `POST /api/challenges/{id}/submit`.
 - JWTs are stored in `sessionStorage` under `feralctf_token`.
 - All authenticated frontend API calls send `Authorization: Bearer <token>`.
 - The scoreboard connects to public `GET /ws` and re-renders on `score_update` events without a page reload.
 - WebSocket reconnect uses exponential backoff.
 - `src/routes.rs` embeds `frontend/` with `rust-embed` and serves the SPA for non-API paths.
-- Admin middleware remains scoped to admin routes only; public auth, challenge, scoreboard, team, and WebSocket routes are not wrapped by `require_admin`.
+- Admin middleware remains scoped to admin routes only; public auth, challenge, scoreboard, team, and WebSocket routes
+  are not wrapped by `require_admin`.
 - No new dependencies were added for Sprint 12; existing `rust-embed` and `mime_guess` are used.
 
 ### Sprint 13
@@ -244,12 +254,15 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - `feralctf init` writes `config.toml` with a random JWT secret, creates `ctf.db`, and creates `attachments/`.
 - `feralctf migrate` runs embedded SQL migrations against the configured database.
 - `feralctf import <file> [--dry-run] [--overwrite] [--attachments <dir>]` remains wired through the import/export module.
-- Migrations are embedded with `include_str!` in `src/db/mod.rs`, so release binaries do not require a loose `migrations/` directory at runtime.
+- Migrations are embedded with `include_str!` in `src/db/mod.rs`, so release binaries do not require a loose
+  `migrations/` directory at runtime.
 - `migrations/002_audit_log.sql` adds the admin audit table and indexes.
 - `db::audit()` inserts admin audit rows.
 - Admin mutating handlers record audit rows; explicit verified paths are challenge create, challenge delete, and team disqualify.
-- `src/routes.rs` adds security headers on all responses: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and CSP with WebSocket connect support.
-- `ServerConfig.allowed_origins` plus `FERALCTF_SERVER_ALLOWED_ORIGINS` configure CORS; default empty CORS config keeps same-origin behavior.
+- `src/routes.rs` adds security headers on all responses: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-
+  Policy`, and CSP with WebSocket connect support.
+- `ServerConfig.allowed_origins` plus `FERALCTF_SERVER_ALLOWED_ORIGINS` configure CORS; default empty CORS config
+  keeps same-origin behavior.
 - Release verification on this workspace produced an 8.7 MB binary and idle RSS of about 9.5 MB.
 
 ## Known Cautions

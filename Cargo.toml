@@ -1,6 +1,6 @@
 [package]
 name = "feralctf"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 authors = ["CyberSquirrels CTF Team"]
 description = "High-performance self-hosted CTF platform. Single binary, SQLite, minimal resources."

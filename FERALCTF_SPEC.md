@@ -2,7 +2,6 @@
 
 ![FeralCTF logo](feral10.jpg)
 
-
 > **Purpose of this document:** Complete implementation specification for the FeralCTF platform.
 > Intended readers: human collaborators, AI coding agents (e.g. Qwen, OpenCode).
 > This document is self-contained. Do not assume prior context. All decisions are documented here.
@@ -17,6 +16,7 @@ embeds frontend assets and schema migrations and requires no external runtime de
 (no Docker, no Node.js, no Python, no database server).
 
 **Primary constraints:**
+
 - Binary size: < 15 MB
 - RAM at idle: < 50 MB
 - RAM under load (200 concurrent users): < 200 MB
@@ -84,11 +84,12 @@ No other runtime is required. The binary is fully self-contained.
 
 FeralCTF runs as a **single OS process**. All subsystems run inside one Tokio runtime:
 
-```
+```text
 feralctf [--config config.toml] [--port 8080]
 ```
 
 On startup the binary:
+
 1. Runs database migrations (idempotent)
 2. Loads `config.toml` (or environment variable overrides)
 3. Starts Axum HTTP server on configured port
@@ -125,6 +126,7 @@ cache misses.
 A single `tokio::sync::broadcast` channel serves all connected WebSocket clients.
 
 **Event types:**
+
 ```rust
 enum WsEvent {
     NewSolve    { team: String, challenge: String, points: u32, first_blood: bool },
@@ -266,13 +268,14 @@ CREATE INDEX idx_sessions_token ON sessions(token_hash);
 
 ### 3.2 Dynamic Scoring Formula
 
-```
+```text
 points = max(min_points, ceil(max_points - decay_rate * (solves - 1)²))
 ```
 
 Default parameters: `max_points=500`, `min_points=50`, `decay_rate=12`
 
 This produces:
+
 - 1st solve: 500 pts
 - 2nd solve: 488 pts
 - 3rd solve: 452 pts
@@ -298,6 +301,7 @@ Rate limits are enforced per-IP via Tower middleware.
 | PUT | `/api/auth/password` | Required | Change password |
 
 **Login response:**
+
 ```json
 {
   "token": "<JWT>",
@@ -319,6 +323,7 @@ Rate limits are enforced per-IP via Tower middleware.
 | DELETE | `/api/admin/challenges/:id` | Admin | Delete challenge |
 
 **Challenge list item:**
+
 ```json
 {
   "id": 1,
@@ -337,6 +342,7 @@ Rate limits are enforced per-IP via Tower middleware.
 ```
 
 **Flag submission:**
+
 ```json
 // Request
 { "flag": "flag{alg_none_ftw}" }
@@ -394,6 +400,7 @@ Rate limits are enforced per-IP via Tower middleware.
 `GET /api/admin/export?attachments=zip` returns JSON only; attachments in separate ZIP.
 
 **Export schema:**
+
 ```json
 {
   "feralctf_export_version": 1,
@@ -468,6 +475,7 @@ Rate limits are enforced per-IP via Tower middleware.
 | `dry_run` | bool | No (default: false) | Validate only, no DB writes |
 
 **Dry run response:**
+
 ```json
 {
   "valid": true,
@@ -534,7 +542,7 @@ Recommended workflow: `--dry-run` first, review output, then import.
 
 Flags are never stored in plaintext.
 
-```
+```text
 flag_hash = sha256(lowercase(trim(flag)) + challenge.flag_salt)
 ```
 
@@ -573,7 +581,8 @@ Target: ~300 ms per hash on the deployment target. Tune `memory` up/down to hit 
 ### 6.6 HTTP Security Headers
 
 Set by Tower middleware on all responses:
-```
+
+```text
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 Referrer-Policy: strict-origin-when-cross-origin
@@ -726,16 +735,30 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 
 ```bash
 cargo run                                               # dev build + run
-cargo build --release                                   # optimized release
+cargo build --release                                   # optimized release (dynamically links libc)
 cargo run -- migrate                                    # run DB migrations
 cargo run -- import challenges.json --dry-run           # validate import bundle
 cargo test                                              # run test suite
 cargo clippy --all-targets --all-features               # lint all targets
 ```
 
+#### Optional: fully static binary via musl
+
+The default release binary dynamically links against the host `libc`/`libm`/`libgcc_s`, which are
+present on all standard Linux distributions. For deployments where static linking is required
+(minimal container base images, airgapped environments), build against the musl target:
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+The resulting binary in `target/x86_64-unknown-linux-musl/release/feralctf` has no runtime
+shared-library dependencies.
+
 ### 9.3 Project Structure
 
-```
+```text
 feralctf/
   src/
     main.rs                 # CLI parsing, init/migrate/import, server startup
@@ -778,6 +801,7 @@ feralctf/
 The current codebase implements the core v1 platform:
 
 ### Core
+
 - [x] SQLite schema + embedded migrations
 - [x] Config loading (file + environment overrides)
 - [x] Argon2id password hashing
@@ -798,6 +822,7 @@ The current codebase implements the core v1 platform:
 - [x] `rust-embed` frontend bundle
 
 ### Import / Export
+
 - [x] JSON export endpoint (challenges + metadata)
 - [x] JSON export with inline base64 attachments
 - [x] JSON export with companion ZIP
@@ -807,6 +832,7 @@ The current codebase implements the core v1 platform:
 - [x] CLI import subcommand (`feralctf import`)
 
 ### Admin
+
 - [x] Competition start / end / freeze controls
 - [x] Announcement broadcast (WebSocket + stored)
 - [x] Submission log (paginated, filterable by team/challenge/result)
@@ -816,6 +842,7 @@ The current codebase implements the core v1 platform:
 - [x] Database backup download endpoint
 
 ### Security
+
 - [x] HTTP security headers
 - [x] Configurable CORS allowlist
 - [x] Flag storage as salted hash for static flags
@@ -824,6 +851,7 @@ The current codebase implements the core v1 platform:
 - [x] Flag sharing detection alert
 
 ### Deployment
+
 - [x] `feralctf init` subcommand (generate config + empty DB + attachments directory)
 - [x] `feralctf migrate` subcommand
 - [x] Release build produces a self-contained binary with embedded frontend and migrations
