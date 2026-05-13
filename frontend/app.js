@@ -729,8 +729,11 @@ function openEditChallengeModal(challenge) {
         <label><span>Points</span>
           <input name="points" type="number" value="${challenge.points}" required>
         </label>
-        <label><span>New flag (leave blank to keep current)</span>
-          <input name="flag" placeholder="flag{...}" autocomplete="off">
+        <label>
+          <span>New flag (leave blank to keep current)</span>
+          <input name="flag" placeholder="flag{...}" autocomplete="off"
+            title="${challenge.flag_type === 'regex' ? 'Pattern: ' : 'Hash: '}${escapeHtml(challenge.flag_hash)}">
+          <small class="muted">type: ${escapeHtml(challenge.flag_type)} · hover input to see stored value</small>
         </label>
         <label><span>Description</span>
           <textarea name="description" rows="6">${escapeHtml(challenge.description)}</textarea>

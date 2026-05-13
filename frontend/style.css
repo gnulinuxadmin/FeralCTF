@@ -449,6 +449,12 @@ label span {
   resize: vertical;
 }
 
+.admin-form small {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-top: -0.25rem;
+}
+
 /* ---- Scoreboard ---- */
 
 .scoreboard {
