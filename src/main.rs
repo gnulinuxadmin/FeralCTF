@@ -20,6 +20,28 @@ enum Command {
     },
 }
 
+const HELP: &str = "\
+feralctf - self-hosted CTF platform
+
+USAGE:
+    feralctf [OPTIONS] [COMMAND]
+
+OPTIONS:
+    --port <PORT>        Listen on PORT (overrides config)
+    --config <PATH>      Load config from PATH (default: config.toml)
+    --version            Print version and exit
+    --help               Print this help and exit
+
+COMMANDS:
+    (none)               Start the server
+    init                 Create config.toml, ctf.db, and attachments/
+    migrate              Apply schema migrations to existing database
+    import <FILE>        Import challenge bundle
+        --dry-run        Preview without writing
+        --overwrite      Replace challenges with matching slug
+        --attachments    Directory of attachment files to copy
+";
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = parse_args(std::env::args().skip(1).collect())?;
@@ -51,6 +73,14 @@ fn parse_args(mut args: Vec<String>) -> Result<Cli, Box<dyn std::error::Error>> 
     let mut index = 0;
     while index < args.len() {
         match args[index].as_str() {
+            "--help" | "-h" => {
+                print!("{HELP}");
+                std::process::exit(0);
+            }
+            "--version" | "-V" => {
+                println!("feralctf {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             "--config" => {
                 config_path = args
                     .get(index + 1)

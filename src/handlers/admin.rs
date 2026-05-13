@@ -646,7 +646,7 @@ pub async fn export_bundle(
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     if matches!(query.attachments.as_deref(), Some("zip")) {
         let zip_bytes = import_export::export_zip(&conn, &state.config)?;
-        Ok(axum::response::Response::builder()
+        axum::response::Response::builder()
             .status(axum::http::StatusCode::OK)
             .header(axum::http::header::CONTENT_TYPE, "application/zip")
             .header(
@@ -654,7 +654,8 @@ pub async fn export_bundle(
                 "attachment; filename=\"feralctf-export.zip\"",
             )
             .body(axum::body::Body::from(zip_bytes))
-            .unwrap())
+            .map_err(|e| anyhow::anyhow!("response build: {e}"))
+            .map(Ok)?
     } else {
         let inline_attachments = matches!(query.attachments.as_deref(), Some("inline"));
         let bundle = import_export::export(&conn, &state.config, inline_attachments)?;
@@ -749,7 +750,9 @@ pub async fn backup(State(state): State<AppState>) -> Response {
                 format!("attachment; filename=\"{filename}\""),
             )
             .body(axum::body::Body::from(bytes))
-            .unwrap(),
+            .unwrap_or_else(|e| {
+                AppError::Internal(anyhow::anyhow!("response build: {e}")).into_response()
+            }),
         Err(e) => e.into_response(),
     }
 }

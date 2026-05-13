@@ -137,7 +137,7 @@ enum WsEvent {
 ```
 
 - Max tested: 500 concurrent WS connections on 1 vCPU
-- Fallback chain: WebSocket → Server-Sent Events → 30s polling
+- Fallback chain: WebSocket → 30s polling (no SSE; clients poll `/api/scoreboard`)
 
 ---
 
@@ -288,7 +288,7 @@ Static scoring (fixed `points` value, decay ignored) is the default for new chal
 ## 4. REST API
 
 All endpoints return `application/json`. Authentication uses `Authorization: Bearer <JWT>`.
-Rate limits are enforced per-IP via Tower middleware.
+Submission rate limits are enforced per team and per challenge (see §6.5).
 
 ### 4.1 Auth
 

@@ -1,2 +1,4 @@
 /target
 *.db
+frontend/dist
+config.toml
