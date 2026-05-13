@@ -1283,6 +1283,36 @@ no new sprint scope is required.
   correct row (`rusqlite 0.32.x / SQLite queries, migrations, backup`). PDF regenerated from the
   patched docx via LibreOffice headless.
 
+### Session 2 improvements
+
+#### Backend (session 2)
+
+- **Invite code upgraded to UUID v4** — `generate_invite_code()` in `src/models/team.rs` replaced
+  with `uuid::Uuid::new_v4().to_string()`. The `uuid = { version = "1", features = ["v4"] }` crate
+  was already in `Cargo.toml`. Team model test updated: `invite_code.len() == 36`.
+
+#### Frontend (session 2)
+
+- **Solved challenges hidden from player grid** — `filteredChallenges()` in `frontend/app.js` now
+  excludes any challenge with `solved_by_team === true`. The filter runs client-side on the cached
+  list; no backend change was needed.
+- **Empty file/hint containers suppressed** — `openChallenge()` wraps `.file-list` and `.hint-list`
+  in a conditional: the container div is only emitted when the array is non-empty, eliminating the
+  ghost margin from empty CSS grid wrappers.
+- **No-team profile — create / join team** — `renderProfile()` detects `!state.user.team_id` and
+  renders a two-column "Join or Create a Team" panel. `createTeam()` calls `POST /api/teams`;
+  `joinTeam()` calls `POST /api/teams/join`. After success, `state.user` is re-fetched from
+  `GET /api/auth/me`, challenges and scoreboard reload, and the profile re-renders.
+- **Team invite code display with copy** — When the user has a team, the profile shows the invite
+  code in a styled `<code class="invite-code">` element with a Copy button that writes to the
+  clipboard via `navigator.clipboard.writeText()`. CSS classes `.invite-row` and `.invite-code`
+  added to `frontend/style.css`.
+- **Admin flag mouseover in edit modal** — The flag `<input>` in `openEditChallengeModal()` now
+  carries a `title` attribute: `"Pattern: <regex>"` for regex challenges, `"Hash: <hash>"` for
+  static ones. A `<small>` note below the field tells the admin to hover. No API change needed;
+  `GET /api/admin/challenges` already returns the full `Challenge` struct with `flag_hash` and
+  `flag_type`.
+
 ---
 
 *End of sprint definitions.*

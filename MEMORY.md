@@ -303,6 +303,30 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - **Architecture spec docx/PDF** — Duplicate `rusqlite` rows in section 2.1 table (0.7.x and 0.31.x) merged into a
   single correct row (`0.32.x / SQLite queries, migrations, backup`). PDF regenerated from docx via LibreOffice.
 
+### Post-Sprint 13 continued (session 2)
+
+- **Solved challenges hidden from grid** — `filteredChallenges()` in `frontend/app.js` now filters
+  out challenges where `solved_by_team === true`. Solved challenges disappear from the player grid
+  immediately after a correct submission.
+- **Empty file/hint containers** — `openChallenge()` now only renders `.file-list` and
+  `.hint-list` wrapper divs when the corresponding arrays are non-empty. Previously empty divs
+  produced visual whitespace from CSS margins.
+- **No-team profile UI** — `renderProfile()` in `frontend/app.js` detects `!state.user.team_id`
+  and renders a two-column panel with a Create Team form and a Join Team form. `createTeam()` calls
+  `POST /api/teams`; `joinTeam()` calls `POST /api/teams/join`. After either succeeds, `state.user`
+  is refreshed from `GET /api/auth/me`, challenges and scoreboard reload, and the profile
+  re-renders showing the new team and invite code.
+- **Team invite code display** — When the user is on a team, the profile shows a Team panel with
+  the invite code in a styled `<code>` element and a Copy button (`navigator.clipboard.writeText`).
+- **Invite code upgraded to UUID v4** — `generate_invite_code()` in `src/models/team.rs` now calls
+  `uuid::Uuid::new_v4().to_string()` (36-char format). The `uuid` crate with the `v4` feature was
+  already in `Cargo.toml`. Team test updated: `invite_code.len() == 36`.
+- **Admin flag mouseover** — The flag input in `openEditChallengeModal()` in `frontend/app.js` now
+  has a `title` attribute showing the stored value: `"Pattern: <regex>"` for regex-type challenges
+  or `"Hash: <hash>"` for static ones. A `<small>` hint below the input tells the admin to hover.
+  No backend change needed — `GET /api/admin/challenges` already returns the full `Challenge` struct
+  including `flag_hash` and `flag_type`.
+
 ## Known Cautions
 
 - Do not revive old single-connection database abstractions.

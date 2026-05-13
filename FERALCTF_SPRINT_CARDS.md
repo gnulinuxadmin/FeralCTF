@@ -295,6 +295,16 @@ responses. Release binary is self-contained.
 - Flag input placeholder changed from `feralctf{...}` to `FLAG{...}`
 - Empty section messages removed — "No files attached." / "No hints available." no longer shown in challenge modal
 - Architecture spec duplicate `rusqlite` row fixed in `FeralCTF_Architecture_Spec_v2.docx` §2.1; PDF regenerated
+- Solved challenges hidden from player grid — `filteredChallenges()` filters out `solved_by_team === true`
+- Empty `.file-list` / `.hint-list` divs suppressed — containers only rendered when arrays are non-empty
+- No-team profile UI — `renderProfile()` shows create/join team forms when `!state.user.team_id`;
+  `createTeam()` calls `POST /api/teams`, `joinTeam()` calls `POST /api/teams/join`; state refreshed
+  from `GET /api/auth/me` after success
+- Team invite code shown in profile — `.invite-code` + Copy button (`navigator.clipboard.writeText`)
+- Invite code upgraded to UUID v4 — `generate_invite_code()` uses `uuid::Uuid::new_v4().to_string()`;
+  team test updated to check `invite_code.len() == 36`
+- Admin flag mouseover in edit modal — flag `<input>` carries `title` showing stored value
+  (`"Pattern: …"` for regex, `"Hash: …"` for static); `<small>` hint visible below field
 
 **Done when:** `cargo test` passes (50/50). All features exercised in browser.
 
