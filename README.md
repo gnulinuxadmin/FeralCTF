@@ -1,7 +1,7 @@
 # FeralCTF
 
 <p align="center">
-  <img src="feral10.jpg" alt="FeralCTF logo" width="180">
+  <img src="images/feral10.jpg" alt="FeralCTF logo" width="180">
 </p>
 
 FeralCTF is a lightweight, self-hosted Capture The Flag platform for academic, nonprofit,
