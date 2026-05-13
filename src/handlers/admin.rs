@@ -122,6 +122,38 @@ pub async fn require_admin(
     Ok(next.run(request).await)
 }
 
+fn admin_audit_context(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(i64, Option<String>), AppError> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .ok_or(AppError::Unauthorized)?;
+    let claims = auth::verify_jwt(token, &state.config.auth.jwt_secret)?;
+    if claims.role != "admin" {
+        return Err(AppError::Forbidden);
+    }
+    Ok((claims.sub, request_ip(headers)))
+}
+
+fn request_ip(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+                .map(ToOwned::to_owned)
+        })
+}
+
 // ---- dashboard ----
 
 pub async fn dashboard(State(state): State<AppState>) -> HandlerResult<Json<serde_json::Value>> {
@@ -146,6 +178,7 @@ pub async fn dashboard(State(state): State<AppState>) -> HandlerResult<Json<serd
 
 pub async fn create_challenge(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateChallengeRequest>,
 ) -> HandlerResult<Json<Challenge>> {
     if req.title.trim().is_empty() {
@@ -194,12 +227,22 @@ pub async fn create_challenge(
     let id = conn.last_insert_rowid();
     let challenge = Challenge::find_by_id(&conn, id)?
         .ok_or_else(|| anyhow::anyhow!("challenge not found after insert"))?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "challenge.create",
+        Some(&format!("challenge:{id}")),
+        Some(&challenge.title),
+        ip.as_deref(),
+    )?;
     state.cache.invalidate_challenges();
     Ok(Json(challenge))
 }
 
 pub async fn update_challenge(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(req): Json<UpdateChallengeRequest>,
 ) -> HandlerResult<Json<Challenge>> {
@@ -275,11 +318,21 @@ pub async fn update_challenge(
     state.cache.invalidate_scoreboard();
     let updated = Challenge::find_by_id(&conn, id)?
         .ok_or_else(|| anyhow::anyhow!("challenge not found after update"))?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "challenge.update",
+        Some(&format!("challenge:{id}")),
+        Some(&updated.title),
+        ip.as_deref(),
+    )?;
     Ok(Json(updated))
 }
 
 pub async fn delete_challenge(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> HandlerResult<Json<serde_json::Value>> {
     let conn = state
@@ -293,6 +346,15 @@ pub async fn delete_challenge(
     if rows == 0 {
         return Err(AppError::NotFound("challenge not found".into()));
     }
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "challenge.delete",
+        Some(&format!("challenge:{id}")),
+        None,
+        ip.as_deref(),
+    )?;
     state.cache.invalidate_challenges();
     state.cache.invalidate_scoreboard();
     Ok(Json(serde_json::json!({ "deleted": true })))
@@ -381,6 +443,7 @@ pub async fn get_users(State(state): State<AppState>) -> HandlerResult<Json<Vec<
 
 pub async fn ban_user(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> HandlerResult<Json<serde_json::Value>> {
     let conn = state
@@ -394,6 +457,15 @@ pub async fn ban_user(
     if rows == 0 {
         return Err(AppError::NotFound("user not found or is admin".into()));
     }
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "user.ban",
+        Some(&format!("user:{id}")),
+        None,
+        ip.as_deref(),
+    )?;
     Ok(Json(serde_json::json!({ "banned": true })))
 }
 
@@ -423,6 +495,7 @@ pub async fn get_teams(State(state): State<AppState>) -> HandlerResult<Json<Vec<
 
 pub async fn disqualify_team(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> HandlerResult<Json<serde_json::Value>> {
     let conn = state
@@ -437,6 +510,15 @@ pub async fn disqualify_team(
         return Err(AppError::NotFound("team not found".into()));
     }
     scoring::recalculate_all_team_scores(&conn)?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "team.disqualify",
+        Some(&format!("team:{id}")),
+        None,
+        ip.as_deref(),
+    )?;
     state.cache.invalidate_scoreboard();
     Ok(Json(serde_json::json!({ "disqualified": true })))
 }
@@ -445,7 +527,21 @@ pub async fn disqualify_team(
 
 pub async fn competition_start(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> HandlerResult<Json<serde_json::Value>> {
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "competition.start",
+        Some("competition"),
+        None,
+        ip.as_deref(),
+    )?;
     state.ws_hub.broadcast(WsEvent::StateChange {
         started: true,
         ended: false,
@@ -456,7 +552,21 @@ pub async fn competition_start(
 
 pub async fn competition_end(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> HandlerResult<Json<serde_json::Value>> {
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "competition.end",
+        Some("competition"),
+        None,
+        ip.as_deref(),
+    )?;
     state.ws_hub.broadcast(WsEvent::StateChange {
         started: false,
         ended: true,
@@ -467,7 +577,21 @@ pub async fn competition_end(
 
 pub async fn competition_freeze(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> HandlerResult<Json<serde_json::Value>> {
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "competition.freeze",
+        Some("competition"),
+        None,
+        ip.as_deref(),
+    )?;
     state.ws_hub.broadcast(WsEvent::StateChange {
         started: true,
         ended: false,
@@ -478,6 +602,7 @@ pub async fn competition_freeze(
 
 pub async fn announce(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<AnnounceRequest>,
 ) -> HandlerResult<Json<serde_json::Value>> {
     if req.title.trim().is_empty() {
@@ -492,6 +617,15 @@ pub async fn announce(
         "INSERT INTO announcements (title, body, challenge_id, is_visible, created_at)
          VALUES (?1, ?2, ?3, 1, ?4)",
         rusqlite::params![req.title, req.body, req.challenge_id, now],
+    )?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "announcement.create",
+        Some("announcement"),
+        Some(&req.title),
+        ip.as_deref(),
     )?;
     state.ws_hub.broadcast(WsEvent::Announcement {
         title: req.title,
@@ -530,6 +664,7 @@ pub async fn export_bundle(
 
 pub async fn import_bundle(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<ImportQuery>,
     mut multipart: Multipart,
 ) -> HandlerResult<Json<ImportResult>> {
@@ -586,6 +721,15 @@ pub async fn import_bundle(
     }
     let result = import_export::import(&conn, &bundle, Some(attachments_dir), &options)?;
     if !options.dry_run && result.valid {
+        let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+        crate::db::audit(
+            &conn,
+            admin_id,
+            "bundle.import",
+            Some("import"),
+            Some(&format!("created {}", result.challenges_created)),
+            ip.as_deref(),
+        )?;
         state.cache.invalidate_challenges();
         state.cache.invalidate_scoreboard();
     }
@@ -805,7 +949,10 @@ mod tests {
             unlock_requires: None,
             is_hidden: true,
         };
-        let Json(challenge) = create_challenge(State(state), Json(req)).await.unwrap();
+        let headers = admin_headers(&state);
+        let Json(challenge) = create_challenge(State(state), headers, Json(req))
+            .await
+            .unwrap();
         assert_ne!(challenge.flag_hash, "flag{secret}");
         assert_eq!(challenge.slug, "test-chal");
         assert!(!challenge.flag_hash.is_empty());
@@ -829,7 +976,8 @@ mod tests {
         }
         assert!(state.cache.is_scoreboard_cached());
 
-        let Json(result) = disqualify_team(State(state.clone()), Path(1))
+        let headers = admin_headers(&state);
+        let Json(result) = disqualify_team(State(state.clone()), headers, Path(1))
             .await
             .unwrap();
         assert_eq!(result["disqualified"], true);
@@ -856,7 +1004,10 @@ mod tests {
         let user = User::create(&conn, &req, "hash").unwrap();
         drop(conn);
 
-        let Json(result) = ban_user(State(state.clone()), Path(user.id)).await.unwrap();
+        let headers = admin_headers(&state);
+        let Json(result) = ban_user(State(state.clone()), headers, Path(user.id))
+            .await
+            .unwrap();
         assert_eq!(result["banned"], true);
 
         let conn = state.db.get().unwrap();
@@ -868,6 +1019,58 @@ mod tests {
             )
             .unwrap();
         assert_eq!(role, "banned");
+    }
+
+    #[tokio::test]
+    async fn audit_log_records_required_admin_actions() {
+        let state = test_state();
+        let headers = admin_headers(&state);
+        let req = CreateChallengeRequest {
+            title: "Audit Chal".to_string(),
+            category: "web".to_string(),
+            description: "desc".to_string(),
+            flag: "flag{audit}".to_string(),
+            flag_type: "static".to_string(),
+            flag_case_sensitive: true,
+            points: 100,
+            max_points: 500,
+            min_points: 50,
+            decay_rate: 12,
+            author: None,
+            tags: Vec::new(),
+            unlock_requires: None,
+            is_hidden: false,
+        };
+
+        let Json(challenge) = create_challenge(State(state.clone()), headers.clone(), Json(req))
+            .await
+            .unwrap();
+        let _ = delete_challenge(State(state.clone()), headers.clone(), Path(challenge.id))
+            .await
+            .unwrap();
+        {
+            let conn = state.db.get().unwrap();
+            conn.execute(
+                "INSERT INTO teams (id, name, invite_code, score) VALUES (7, 'Audit Team', 'AUDIT123', 500)",
+                [],
+            )
+            .unwrap();
+        }
+        let _ = disqualify_team(State(state.clone()), headers, Path(7))
+            .await
+            .unwrap();
+
+        let conn = state.db.get().unwrap();
+        for action in ["challenge.create", "challenge.delete", "team.disqualify"] {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM audit_log WHERE action = ?1",
+                    rusqlite::params![action],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 1, "missing audit action {action}");
+        }
     }
 
     #[test]

@@ -14,7 +14,7 @@ For the complete technical design, schema, API details, security model, and road
 
 FeralCTF is under active development.
 
-The core application is taking shape as a single-binary CTF platform with an embedded player and admin interface.
+The core application is in place as a single-binary CTF platform with an embedded player and admin interface.
 
 Status summary:
 
@@ -23,9 +23,10 @@ Status summary:
 - Challenge import/export is implemented, including dry-run import and CTFd detection.
 - Submission rate limiting, exponential wrong-attempt backoff, and flag-sharing detection are implemented.
 - The browser interface is served by the Rust binary without requiring a Node.js production runtime.
+- CLI setup and migration commands, HTTP hardening, and admin audit logging are implemented.
 - The codebase is regularly checked with `cargo check`, `cargo test`, and `cargo clippy --all-targets --all-features`.
 
-Installer-style CLI commands, release hardening, security headers, audit logging, and final release validation are still upcoming.
+Release builds are self-contained and remain comfortably below the intended size and idle memory targets.
 
 ## Architecture Overview
 
@@ -123,6 +124,10 @@ The following pieces are implemented:
 - Profile view with team score/rank and solve history
 - Admin SPA surfaces for overview, challenges, users, teams, and settings
 - JWT session storage in the browser via `sessionStorage`
+- Setup and migration commands for local installs
+- HTTP security headers and configurable CORS
+- Admin audit log for sensitive management actions
+- Embedded schema migrations for single-binary operation
 
 ## How The Finished Application Will Work
 
@@ -203,13 +208,6 @@ Operational expectations:
 - Put production instances behind HTTPS.
 
 ## Upcoming Features
-
-Planned upcoming work includes:
-
-- CLI commands such as initialization and migration
-- Security headers and HTTP hardening
-- Audit logging for admin actions
-- Release build validation and final deployment workflow
 
 ## API Surface Implemented So Far
 
@@ -331,7 +329,9 @@ FERALCTF_SPEC.md          # full technical specification
 - Static flags are stored as salted hashes, not plaintext.
 - Public challenge responses must never expose flag hashes or salts.
 - JWTs are backed by server-side session revocation.
+- HTTP security headers are applied to responses.
 - Every flag submission is recorded for auditability.
+- Admin management actions are recorded in the audit log.
 - Submission rate limiting is enforced per team.
 - Repeated wrong submissions trigger exponential backoff.
 - Flag-sharing detection is warning-only; it does not auto-disqualify teams.

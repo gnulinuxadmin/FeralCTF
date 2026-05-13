@@ -13,12 +13,14 @@ use crate::handlers::ws::ws_handler;
 use axum::{
     Router,
     body::Body,
-    http::{StatusCode, Uri, header},
-    middleware,
+    extract::Request,
+    http::{HeaderValue, Method, StatusCode, Uri, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
 use rust_embed::RustEmbed;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 
 #[derive(RustEmbed)]
 #[folder = "frontend/"]
@@ -27,6 +29,7 @@ struct FrontendAssets;
 /// Build the application router. Takes ownership of AppState so the admin
 /// middleware can be baked in via `from_fn_with_state`.
 pub fn create_router(state: AppState) -> Router {
+    let cors = cors_layer(&state);
     let admin_router = Router::new()
         .route("/api/admin", get(dashboard))
         .route("/api/admin/challenges", post(create_challenge))
@@ -74,7 +77,48 @@ pub fn create_router(state: AppState) -> Router {
         // Admin (require_admin middleware applied inside admin_router)
         .merge(admin_router)
         .fallback(frontend)
+        .layer(middleware::from_fn(security_headers))
+        .layer(cors)
         .with_state(state)
+}
+
+fn cors_layer(state: &AppState) -> CorsLayer {
+    let origins = state
+        .config
+        .server
+        .allowed_origins
+        .iter()
+        .filter_map(|origin| origin.parse::<HeaderValue>().ok())
+        .collect::<Vec<_>>();
+
+    let layer = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+
+    if origins.is_empty() {
+        layer
+    } else {
+        layer.allow_origin(AllowOrigin::list(origins))
+    }
+}
+
+async fn security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert("X-Frame-Options", HeaderValue::from_static("DENY"));
+    headers.insert(
+        "Referrer-Policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'self'; connect-src 'self' ws: wss:"),
+    );
+    response
 }
 
 async fn frontend(uri: Uri) -> Response {

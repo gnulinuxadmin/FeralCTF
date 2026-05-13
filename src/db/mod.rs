@@ -24,10 +24,35 @@ pub fn init_pool(db_path: &str) -> Result<DbPool, Error> {
     Ok(pool)
 }
 
-/// Execute all .sql migration files idempotently against an open connection.
+/// Execute embedded SQL migrations idempotently against an open connection.
 /// Safe to call on an existing database — all DDL uses IF NOT EXISTS.
 pub fn run_migrations(conn: &rusqlite::Connection) -> Result<(), Error> {
-    connection::MigrationRunner::new("migrations").run(conn)
+    conn.execute_batch(include_str!("../../migrations/001_initial.sql"))?;
+    conn.execute_batch(include_str!("../../migrations/002_audit_log.sql"))?;
+    Ok(())
+}
+
+pub fn audit(
+    conn: &rusqlite::Connection,
+    user_id: i64,
+    action: &str,
+    target: Option<&str>,
+    detail: Option<&str>,
+    ip: Option<&str>,
+) -> Result<(), Error> {
+    conn.execute(
+        "INSERT INTO audit_log (user_id, action, target, detail, ip_address, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![
+            user_id,
+            action,
+            target,
+            detail,
+            ip,
+            chrono::Utc::now().timestamp(),
+        ],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

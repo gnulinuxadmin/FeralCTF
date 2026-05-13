@@ -19,19 +19,18 @@ Sprints complete:
 - Sprint 10 - Import / Export
 - Sprint 11 - Anti-Cheat + Rate Limiting
 - Sprint 12 - Frontend SPA
+- Sprint 13 - CLI Subcommands + Hardening
 
 Current state file should read:
 
 ```text
-SPRINT 12 DONE
-DONE_COUNT: 13
+SPRINT 13 DONE
+DONE_COUNT: 14
 TOTAL_SPRINTS: 14
-SPRINTS_REMAINING: 1
+SPRINTS_REMAINING: 0
 ```
 
-Next sprint:
-
-- Sprint 13 - CLI Subcommands + Hardening
+Next sprint: none currently defined.
 
 ## Verified Baseline
 
@@ -46,7 +45,7 @@ cargo clippy --all-targets --all-features
 Last known test count:
 
 ```text
-49 passed
+50 passed
 ```
 
 ## Key Implementation Notes
@@ -235,6 +234,23 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - `src/routes.rs` embeds `frontend/` with `rust-embed` and serves the SPA for non-API paths.
 - Admin middleware remains scoped to admin routes only; public auth, challenge, scoreboard, team, and WebSocket routes are not wrapped by `require_admin`.
 - No new dependencies were added for Sprint 12; existing `rust-embed` and `mime_guess` are used.
+
+### Sprint 13
+
+- `src/main.rs` implements CLI parsing with `std::env::args`; no CLI dependency was added.
+- Default `feralctf` starts the server.
+- `feralctf --port <port>` overrides the configured port for server startup.
+- `feralctf --config <path>` loads an alternate config file for server, migrate, and import.
+- `feralctf init` writes `config.toml` with a random JWT secret, creates `ctf.db`, and creates `attachments/`.
+- `feralctf migrate` runs embedded SQL migrations against the configured database.
+- `feralctf import <file> [--dry-run] [--overwrite] [--attachments <dir>]` remains wired through the import/export module.
+- Migrations are embedded with `include_str!` in `src/db/mod.rs`, so release binaries do not require a loose `migrations/` directory at runtime.
+- `migrations/002_audit_log.sql` adds the admin audit table and indexes.
+- `db::audit()` inserts admin audit rows.
+- Admin mutating handlers record audit rows; explicit verified paths are challenge create, challenge delete, and team disqualify.
+- `src/routes.rs` adds security headers on all responses: `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and CSP with WebSocket connect support.
+- `ServerConfig.allowed_origins` plus `FERALCTF_SERVER_ALLOWED_ORIGINS` configure CORS; default empty CORS config keeps same-origin behavior.
+- Release verification on this workspace produced an 8.7 MB binary and idle RSS of about 9.5 MB.
 
 ## Known Cautions
 

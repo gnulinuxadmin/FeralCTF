@@ -22,6 +22,7 @@ pub struct ServerConfig {
     pub port: u16,
     pub host: String,
     pub base_url: String,
+    pub allowed_origins: Vec<String>,
 }
 
 impl Default for ServerConfig {
@@ -30,6 +31,7 @@ impl Default for ServerConfig {
             port: 8080,
             host: "0.0.0.0".to_string(),
             base_url: "http://localhost:8080".to_string(),
+            allowed_origins: Vec::new(),
         }
     }
 }
@@ -183,6 +185,10 @@ fn apply_env_overrides(config: &mut Config) -> Result<(), anyhow::Error> {
     set_from_env(&mut config.server.port, "FERALCTF_SERVER_PORT")?;
     set_string_from_env(&mut config.server.host, "FERALCTF_SERVER_HOST");
     set_string_from_env(&mut config.server.base_url, "FERALCTF_SERVER_BASE_URL");
+    set_list_from_env(
+        &mut config.server.allowed_origins,
+        "FERALCTF_SERVER_ALLOWED_ORIGINS",
+    );
 
     set_string_from_env(&mut config.competition.name, "FERALCTF_COMPETITION_NAME");
     set_optional_string_from_env(
@@ -281,6 +287,17 @@ fn set_string_from_env(target: &mut String, key: &str) {
     }
 }
 
+fn set_list_from_env(target: &mut Vec<String>, key: &str) {
+    if let Ok(value) = env::var(key) {
+        *target = value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+    }
+}
+
 fn set_optional_string_from_env(target: &mut Option<String>, key: &str) {
     if let Ok(value) = env::var(key) {
         *target = if value.trim().is_empty() {
@@ -331,6 +348,7 @@ const EXAMPLE_CONFIG: &str = r#"[server]
 port = 8080
 host = "0.0.0.0"
 base_url = "http://localhost:8080"
+allowed_origins = []
 
 [competition]
 name = "FeralCTF"

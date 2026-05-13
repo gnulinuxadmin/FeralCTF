@@ -1,18 +1,167 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, path::Path, sync::Arc};
+
+#[derive(Debug)]
+struct Cli {
+    config_path: String,
+    port: Option<u16>,
+    command: Command,
+}
+
+#[derive(Debug)]
+enum Command {
+    Serve,
+    Init,
+    Migrate,
+    Import {
+        file: String,
+        attachments: Option<std::path::PathBuf>,
+        overwrite: bool,
+        dry_run: bool,
+    },
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.first().map(String::as_str) == Some("import") {
-        run_import(&args[1..])?;
-    } else {
-        run_server().await?;
+    let cli = parse_args(std::env::args().skip(1).collect())?;
+    match cli.command {
+        Command::Serve => run_server(&cli.config_path, cli.port).await?,
+        Command::Init => run_init(&cli.config_path)?,
+        Command::Migrate => run_migrate(&cli.config_path)?,
+        Command::Import {
+            file,
+            attachments,
+            overwrite,
+            dry_run,
+        } => run_import(
+            &cli.config_path,
+            &file,
+            attachments.as_deref(),
+            overwrite,
+            dry_run,
+        )?,
     }
     Ok(())
 }
 
-async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
-    let config = feralctf::config::load("config.toml")?;
+fn parse_args(mut args: Vec<String>) -> Result<Cli, Box<dyn std::error::Error>> {
+    let mut config_path = "config.toml".to_string();
+    let mut port = None;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--config" => {
+                config_path = args
+                    .get(index + 1)
+                    .ok_or("--config requires a path")?
+                    .clone();
+                args.drain(index..=index + 1);
+            }
+            "--port" => {
+                let value = args.get(index + 1).ok_or("--port requires a value")?;
+                port = Some(value.parse()?);
+                args.drain(index..=index + 1);
+            }
+            _ => index += 1,
+        }
+    }
+
+    let command = match args.first().map(String::as_str) {
+        None => Command::Serve,
+        Some("init") => Command::Init,
+        Some("migrate") => Command::Migrate,
+        Some("import") => parse_import(&args[1..])?,
+        Some(other) => return Err(format!("unknown command: {other}").into()),
+    };
+
+    Ok(Cli {
+        config_path,
+        port,
+        command,
+    })
+}
+
+fn parse_import(args: &[String]) -> Result<Command, Box<dyn std::error::Error>> {
+    let file = args
+        .first()
+        .ok_or("usage: feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]")?
+        .clone();
+    let mut attachments = None;
+    let mut overwrite = false;
+    let mut dry_run = false;
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--attachments" => {
+                let dir = args
+                    .get(index + 1)
+                    .ok_or("--attachments requires a directory")?;
+                attachments = Some(std::path::PathBuf::from(dir));
+                index += 2;
+            }
+            "--overwrite" => {
+                overwrite = true;
+                index += 1;
+            }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            other => return Err(format!("unknown import option: {other}").into()),
+        }
+    }
+
+    Ok(Command::Import {
+        file,
+        attachments,
+        overwrite,
+        dry_run,
+    })
+}
+
+fn run_init(config_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let config = default_config();
+    std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
+    println!("Created: {config_path}");
+
+    let pool = feralctf::db::init_pool(&config.database.path)?;
+    {
+        let conn = pool.get()?;
+        feralctf::db::run_migrations(&conn)?;
+    }
+    println!("Created: {}", config.database.path);
+
+    std::fs::create_dir_all(&config.storage.attachments_path)?;
+    println!("Created: {}", config.storage.attachments_path);
+    Ok(())
+}
+
+fn default_config() -> feralctf::Config {
+    let mut config = feralctf::Config::default();
+    config.auth.jwt_secret = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    config
+}
+
+fn run_migrate(config_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let config = feralctf::config::load(config_path)?;
+    let pool = feralctf::db::init_pool(&config.database.path)?;
+    let conn = pool.get()?;
+    feralctf::db::run_migrations(&conn)?;
+    println!("Migrations applied to {}", config.database.path);
+    Ok(())
+}
+
+async fn run_server(
+    config_path: &str,
+    port: Option<u16>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = feralctf::config::load(config_path)?;
+    if let Some(port) = port {
+        config.server.port = port;
+    }
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
     let pool = feralctf::db::init_pool(&config.database.path)?;
     {
@@ -39,42 +188,20 @@ async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_import(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
-    let file = args
-        .first()
-        .ok_or("usage: feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]")?;
-    let mut attachments = None;
-    let mut overwrite = false;
-    let mut dry_run = false;
-    let mut index = 1;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--attachments" => {
-                let dir = args
-                    .get(index + 1)
-                    .ok_or("--attachments requires a directory")?;
-                attachments = Some(std::path::PathBuf::from(dir));
-                index += 2;
-            }
-            "--overwrite" => {
-                overwrite = true;
-                index += 1;
-            }
-            "--dry-run" => {
-                dry_run = true;
-                index += 1;
-            }
-            other => return Err(format!("unknown import option: {other}").into()),
-        }
-    }
-
-    let config = feralctf::config::load("config.toml")?;
+fn run_import(
+    config_path: &str,
+    file: &str,
+    attachments: Option<&Path>,
+    overwrite: bool,
+    dry_run: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config = feralctf::config::load(config_path)?;
     let pool = feralctf::db::init_pool(&config.database.path)?;
     let conn = pool.get()?;
     let raw = std::fs::read(file)?;
     let bundle = feralctf::import_export::detect_and_convert_ctfd(&raw)?;
     let options = feralctf::import_export::ImportOptions { overwrite, dry_run };
-    let result = feralctf::import_export::import(&conn, &bundle, attachments.as_deref(), &options)?;
+    let result = feralctf::import_export::import(&conn, &bundle, attachments, &options)?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }
