@@ -263,4 +263,31 @@ responses. Release binary is self-contained.
 
 ---
 
+---
+
+## POST-SPRINT — v1.0rc UI + Admin Fixes
+
+**Status:** Complete (v1.0rc5)
+
+**Scope:** Improvements made after Sprint 13. No new sprint number assigned.
+
+**Tasks completed:**
+
+- Web registration form — `showRegisterModal()` and `registerUser()` in `frontend/app.js`
+- Admin nav hidden from non-admin accounts — `updateAdminNav()` in `frontend/app.js`
+- Themed error page for unknown routes — `error_page()` in `src/routes.rs`; SPA fallback removed
+- Absolute asset paths in `frontend/index.html` (prevents resolution failures from non-root paths)
+- `GET /api/admin/challenges` endpoint — `list_admin_challenges` in `src/handlers/admin.rs` using `Challenge::list_all()`
+- Route wired in `src/routes.rs` (`list_admin_challenges` on `GET /api/admin/challenges`)
+- Admin challenge visibility toggle — `toggleChallengeVisibility()` via existing `PUT /api/admin/challenges/{id}`
+- Challenge card layout — `.card-top / .card-bottom`, difficulty dot, category color, solve count
+- Category filter pills replacing `<select>` element
+- Scoreboard medals, progress bar, current-team highlight
+- Brand icon (`feral10.jpg`) in topbar
+- CSS layout — topbar grid, nav pill styles, admin sidebar, card grid updated to match §12 mockups
+
+**Done when:** `cargo test` passes (50/50). All features exercised in browser.
+
+---
+
 FeralCTF — Apache 2.0 · CyberSquirrels CTF Team

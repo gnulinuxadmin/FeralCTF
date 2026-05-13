@@ -176,6 +176,16 @@ pub async fn dashboard(State(state): State<AppState>) -> HandlerResult<Json<serd
 
 // ---- challenge CRUD ----
 
+pub async fn list_admin_challenges(
+    State(state): State<AppState>,
+) -> HandlerResult<Json<Vec<Challenge>>> {
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    Ok(Json(Challenge::list_all(&conn)?))
+}
+
 pub async fn create_challenge(
     State(state): State<AppState>,
     headers: HeaderMap,

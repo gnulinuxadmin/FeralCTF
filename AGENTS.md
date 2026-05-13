@@ -2,6 +2,9 @@
 
 Project guidance for AI coding agents working on FeralCTF.
 
+**Current version: 1.0rc5.** All sprints (0–13) complete. Post-sprint UI and admin improvements
+are documented in `FERALCTF_SPRINTS.md` §Post-Sprint 13 and `MEMORY.md` §Post-Sprint 13.
+
 ## Source Of Truth
 
 Read these before coding:

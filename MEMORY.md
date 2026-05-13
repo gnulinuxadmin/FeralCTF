@@ -4,6 +4,8 @@ Persistent project memory for agents working on FeralCTF.
 
 ## Current Status
 
+Version: **1.0rc5** — all sprints complete, post-sprint UI and admin improvements shipped.
+
 Sprints complete:
 
 - Sprint 0 - Project scaffold
@@ -20,15 +22,7 @@ Sprints complete:
 - Sprint 11 - Anti-Cheat + Rate Limiting
 - Sprint 12 - Frontend SPA
 - Sprint 13 - CLI Subcommands + Hardening
-
-Current state file should read:
-
-```text
-SPRINT 13 DONE
-DONE_COUNT: 14
-TOTAL_SPRINTS: 14
-SPRINTS_REMAINING: 0
-```
+- Post-Sprint (1.0rc) - UI + Admin fixes (see FERALCTF_SPRINTS.md §Post-Sprint 13)
 
 Next sprint: none currently defined.
 
@@ -264,6 +258,30 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - `ServerConfig.allowed_origins` plus `FERALCTF_SERVER_ALLOWED_ORIGINS` configure CORS; default empty CORS config
   keeps same-origin behavior.
 - Release verification on this workspace produced an 8.7 MB binary and idle RSS of about 9.5 MB.
+
+### Post-Sprint 13 (v1.0rc)
+
+- `frontend/app.js` adds `showRegisterModal()` and `registerUser()` — web registration form, no backend changes needed.
+- `updateAdminNav()` in `frontend/app.js` adds/removes the Admin nav button based on `state.user.role === 'admin'`.
+- `error_page()` added to `src/routes.rs`; the `frontend()` fallback no longer serves `index.html` for all unknown paths.
+  Instead, unknown paths return a styled HTML error page. The SPA shell handles its own routing on the client.
+- `frontend/index.html` asset paths changed to absolute (`/style.css`, `/app.js`) to prevent resolution failures when
+  the error page is served from non-root paths.
+- `list_admin_challenges` handler added to `src/handlers/admin.rs` using `Challenge::list_all()`. It is wired on
+  `GET /api/admin/challenges` in `src/routes.rs` — protected by `require_admin` middleware.
+- `renderAdminChallenges()` in `frontend/app.js` now fetches from `GET /api/admin/challenges` (admin endpoint) instead
+  of `state.challenges` (populated by the player endpoint which omits hidden challenges).
+- `toggleChallengeVisibility()` in `frontend/app.js` calls `PUT /api/admin/challenges/{id}` with
+  `{ is_hidden: !current }`.
+- `frontend/feral10.jpg` copied from project root so `rust-embed` includes it; rendered as `.brand-icon` in topbar.
+- Challenge cards updated: `.card-top / .card-bottom`, difficulty dot (`.easy/.medium/.hard`), category color border,
+  solve count, solved marker. Category filter uses `.cat-pill` buttons instead of `<select>`.
+- Scoreboard: rank medals for top 3, progress bar column, current-team row highlight via `.current-team`.
+- CSS in `frontend/style.css` updated: topbar grid, `.brand` flex, `.nav button` underline-style active state,
+  `.user-info / .user-badge` display, `.toolbar / .search-input / .category-pills / .cat-pill`, `.scoreboard-header /
+  .live-dot`, admin sidebar `border-left` active style. Responsive breakpoints updated.
+- `updateAuth()` and `loginUser()` both call `updateAuth()` after `Promise.all([loadChallenges(), loadScoreboard()])`
+  to ensure score display is accurate on initial load and on login.
 
 ## Known Cautions
 

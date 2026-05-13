@@ -2,7 +2,8 @@ use crate::AppState;
 use crate::handlers::admin::{
     announce, backup, ban_user, competition_end, competition_freeze, competition_start,
     create_challenge, dashboard, delete_challenge, disqualify_team, export_bundle, get_teams,
-    get_users, import_bundle, list_submissions, require_admin, update_challenge,
+    get_users, import_bundle, list_admin_challenges, list_submissions, require_admin,
+    update_challenge,
 };
 use crate::handlers::auth::{change_password, login, logout, me, register};
 use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
@@ -32,7 +33,7 @@ pub fn create_router(state: AppState) -> Router {
     let cors = cors_layer(&state);
     let admin_router = Router::new()
         .route("/api/admin", get(dashboard))
-        .route("/api/admin/challenges", post(create_challenge))
+        .route("/api/admin/challenges", get(list_admin_challenges).post(create_challenge))
         .route(
             "/api/admin/challenges/{id}",
             put(update_challenge).delete(delete_challenge),

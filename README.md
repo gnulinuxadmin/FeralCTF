@@ -11,21 +11,27 @@ database server, or a separate frontend build pipeline.
 
 For deep technical details, see [FERALCTF_SPEC.md](FERALCTF_SPEC.md).
 
+## Status
+
+Current release: **1.0rc5** — all core sprints complete. Feature-complete for small-to-medium competitions;
+see [§11 Out of Scope](FERALCTF_SPEC.md) for deferred items.
+
 ## Features
 
-- Embedded player and admin browser interface
-- User registration, login, logout, password change, and server-side session revocation
-- First registered user becomes the initial admin
+- Web-based user registration, login, logout, password change, and server-side session revocation
+- First registered user becomes the initial admin; admin navigation is hidden from non-admin accounts
 - Team creation and invite-code joining
 - Challenge list and detail views with files, hints, solve status, categories, search, and flag submission
 - Static and regex flag validation with salted hashes for static flags
 - Dynamic scoring, score recalculation, score history, and cached scoreboard reads
 - Live scoreboard updates over WebSocket
-- Admin challenge, user, team, competition, announcement, import/export, and backup controls
+- Admin challenge list (all challenges including hidden), visibility toggle, create, update, and delete
+- Admin user, team, competition, announcement, import/export, and backup controls
 - JSON/ZIP challenge import and export, including CTFd import detection
 - Dry-run imports for previewing challenge bundles before writing to the database
 - Submission rate limiting, wrong-attempt backoff, and flag-sharing alerts
 - Admin audit log for sensitive management actions
+- Themed error pages for unknown routes
 - HTTP security headers and configurable CORS
 - Single-binary startup with embedded frontend and embedded schema migrations
 

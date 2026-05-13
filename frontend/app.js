@@ -22,15 +22,16 @@ async function init() {
   connectWebSocket();
   await loadSession();
   await Promise.all([loadChallenges(), loadScoreboard()]);
+  updateAuth();
   navigate('challenges');
 }
 
 function renderShell() {
   app.innerHTML = `
     <header class="topbar">
-      <div>
-        <h1>FeralCTF</h1>
-        <p class="muted">terminal capture console</p>
+      <div class="brand">
+        <img src="/feral10.jpg" class="brand-icon" alt="">
+        <h1>Feral CTF</h1>
       </div>
       <nav class="nav">
         <button data-view="challenges">Challenges</button>
@@ -74,11 +75,19 @@ function updateAuth() {
   const form = document.getElementById('auth-form');
   if (!form) return;
   if (state.user) {
+    const teams = state.scoreboard?.teams || [];
+    const team = state.user.team_id ? teams.find((t) => t.team_id === state.user.team_id) : null;
+    const displayName = team ? team.team_name : state.user.username;
+    const score = team ? team.score.toLocaleString() : '0';
     form.innerHTML = `
-      <span class="session-user">${escapeHtml(state.user.username)}</span>
-      <button type="button" id="logout-button">Logout</button>
+      <div class="user-info">
+        <span class="user-badge clickable" id="profile-badge">${escapeHtml(displayName)}</span>
+        <span class="user-badge pts">${score} pts</span>
+        <button type="button" id="logout-button">Logout</button>
+      </div>
     `;
     document.getElementById('logout-button').addEventListener('click', logoutUser);
+    document.getElementById('profile-badge').addEventListener('click', () => navigate('profile'));
   }
   updateAdminNav();
 }
@@ -113,8 +122,8 @@ async function loginUser(event) {
     state.token = result.token;
     state.user = result.user;
     sessionStorage.setItem('feralctf_token', result.token);
-    updateAuth();
     await Promise.all([loadChallenges(), loadScoreboard()]);
+    updateAuth();
     renderCurrent();
     toast('session opened');
   } catch (error) {
@@ -172,8 +181,8 @@ async function registerUser(event) {
     state.user = result.user;
     sessionStorage.setItem('feralctf_token', result.token);
     closeModal();
-    updateAuth();
     await Promise.all([loadChallenges(), loadScoreboard()]);
+    updateAuth();
     renderCurrent();
     toast('account created');
   } catch (error) {
@@ -213,32 +222,25 @@ function renderChallenges() {
 
   view.innerHTML = `
     <section class="toolbar">
-      <label>
-        <span>Category</span>
-        <select id="category-filter">
-          ${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join('')}
-        </select>
-      </label>
-      <label>
-        <span>Search</span>
-        <input id="challenge-search" value="${escapeHtml(state.query)}" placeholder="challenge name">
-      </label>
+      <input id="challenge-search" class="search-input" value="${escapeHtml(state.query)}" placeholder="search challenges...">
+      <div class="category-pills">
+        ${categories.map((cat) => `<button class="cat-pill${state.selectedCategory === cat ? ' active' : ''}" data-cat="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`).join('')}
+      </div>
     </section>
     <section class="challenge-grid">
       ${challenges.map(challengeCard).join('') || emptyState('No visible challenges.')}
     </section>
   `;
 
-  const categoryFilter = document.getElementById('category-filter');
-  categoryFilter.value = state.selectedCategory;
-  categoryFilter.addEventListener('change', () => {
-    state.selectedCategory = categoryFilter.value;
+  document.getElementById('challenge-search').addEventListener('input', (e) => {
+    state.query = e.target.value;
     renderChallenges();
   });
-  const search = document.getElementById('challenge-search');
-  search.addEventListener('input', () => {
-    state.query = search.value;
-    renderChallenges();
+  document.querySelectorAll('.cat-pill').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.selectedCategory = btn.dataset.cat;
+      renderChallenges();
+    });
   });
   document.querySelectorAll('[data-challenge-id]').forEach((card) => {
     card.addEventListener('click', () => openChallenge(Number(card.dataset.challengeId)));
@@ -256,20 +258,16 @@ function filteredChallenges() {
 
 function challengeCard(challenge) {
   const difficulty = difficultyFor(challenge.points);
-  const solved = challenge.solved_by_team ? '<span class="solved">solved</span>' : '';
   return `
     <article class="card challenge-card" data-challenge-id="${challenge.id}">
-      <div class="card-row">
-        <h2>${escapeHtml(challenge.title)}</h2>
-        ${solved}
-      </div>
-      <div class="card-row meta">
+      <div class="card-top">
         <span class="category" style="--category-color:${categoryColor(challenge.category)}">${escapeHtml(challenge.category)}</span>
-        <span><i class="dot ${difficulty}"></i>${difficulty}</span>
+        ${challenge.solved_by_team ? '<span class="solved-flag">✓</span>' : ''}
       </div>
-      <div class="card-row">
-        <strong>${challenge.points} pts</strong>
-        <span>${challenge.solve_count} solves</span>
+      <h2 class="card-title">${escapeHtml(challenge.title)}</h2>
+      <div class="card-bottom">
+        <strong class="card-pts">${challenge.points} <span class="pts-label muted">pts</span></strong>
+        <span class="card-meta"><i class="dot ${difficulty}"></i>${difficulty} · ${challenge.solve_count} solves</span>
       </div>
     </article>
   `;
@@ -390,9 +388,12 @@ function renderScoreboard() {
   const maxScore = Math.max(1, ...state.scoreboard.teams.map((team) => team.score));
   view.innerHTML = `
     <section class="panel">
-      <h2>Scoreboard</h2>
+      <div class="scoreboard-header">
+        <h2>Live Scoreboard</h2>
+        <span class="live-dot">● live</span>
+      </div>
       <table class="scoreboard">
-        <thead><tr><th>Rank</th><th>Team</th><th>Solves</th><th>Progress</th><th>Score</th></tr></thead>
+        <thead><tr><th>#</th><th>Team</th><th>Solves</th><th>Progress</th><th>Score</th></tr></thead>
         <tbody>${state.scoreboard.teams.map((team) => scoreRow(team, maxScore)).join('') || '<tr><td colspan="5">No teams yet.</td></tr>'}</tbody>
       </table>
     </section>
@@ -402,10 +403,12 @@ function renderScoreboard() {
 function scoreRow(team, maxScore) {
   const isCurrent = state.user && state.user.team_id === team.team_id;
   const progress = Math.round((team.score / maxScore) * 100);
+  const medals = ['🥇', '🥈', '🥉'];
+  const rank = team.rank <= 3 ? medals[team.rank - 1] : team.rank;
   return `
     <tr class="${isCurrent ? 'current-team' : ''}">
-      <td>${team.rank}</td>
-      <td>${escapeHtml(team.team_name)}</td>
+      <td>${rank}</td>
+      <td>${escapeHtml(team.team_name)}${isCurrent ? ' <span class="muted">(you)</span>' : ''}</td>
       <td>${team.solve_count}</td>
       <td><div class="progress"><span style="width:${progress}%"></span></div></td>
       <td>${team.score}</td>
@@ -466,7 +469,7 @@ async function renderAdmin(section = 'overview') {
   view.innerHTML = `
     <section class="admin">
       <aside>
-        ${['overview', 'challenges', 'users', 'teams', 'settings'].map((item) => `<button data-admin="${item}" class="${item === section ? 'active' : ''}">${item}</button>`).join('')}
+        ${['overview', 'challenges', 'users', 'teams', 'settings'].map((item) => `<button data-admin="${item}" class="${item === section ? 'active' : ''}">■ ${item}</button>`).join('')}
       </aside>
       <div id="admin-content" class="panel"></div>
     </section>
@@ -512,8 +515,15 @@ function submissionRow(submission) {
   `;
 }
 
-function renderAdminChallenges() {
+async function renderAdminChallenges() {
   const content = document.getElementById('admin-content');
+  let challenges;
+  try {
+    challenges = await api('/api/admin/challenges');
+  } catch (error) {
+    content.innerHTML = emptyState(error.message);
+    return;
+  }
   content.innerHTML = `
     <h2>Challenges</h2>
     <form id="challenge-form" class="admin-form">
@@ -522,31 +532,67 @@ function renderAdminChallenges() {
       <input name="points" type="number" placeholder="points" required>
       <input name="flag" placeholder="flag" required>
       <textarea name="description" placeholder="description"></textarea>
+      <label class="toggle-row">
+        <span>Start visible</span>
+        <span class="toggle-switch">
+          <input type="checkbox" name="is_visible">
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
       <button type="submit">Add Challenge</button>
     </form>
     <table class="scoreboard">
-      <thead><tr><th>Title</th><th>Category</th><th>Points</th><th>Actions</th></tr></thead>
-      <tbody>${state.challenges.map(adminChallengeRow).join('') || '<tr><td colspan="4">No challenges.</td></tr>'}</tbody>
+      <thead><tr><th>Title</th><th>Category</th><th>Points</th><th>Visible</th><th>Actions</th></tr></thead>
+      <tbody>${challenges.map(adminChallengeRow).join('') || '<tr><td colspan="5">No challenges.</td></tr>'}</tbody>
     </table>
   `;
   document.getElementById('challenge-form').addEventListener('submit', createChallenge);
   document.querySelectorAll('[data-delete-challenge]').forEach((button) => {
     button.addEventListener('click', () => deleteChallenge(Number(button.dataset.deleteChallenge)));
   });
+  document.querySelectorAll('[data-toggle-hidden]').forEach((input) => {
+    input.addEventListener('change', () => {
+      toggleChallengeVisibility(Number(input.dataset.toggleHidden), !input.checked);
+    });
+  });
+  document.querySelectorAll('[data-edit-challenge]').forEach((button) => {
+    const id = Number(button.dataset.editChallenge);
+    const challenge = challenges.find((c) => c.id === id);
+    button.addEventListener('click', () => openEditChallengeModal(challenge));
+  });
 }
 
 function adminChallengeRow(challenge) {
+  const visible = !challenge.is_hidden;
   return `
     <tr>
       <td>${escapeHtml(challenge.title)}</td>
       <td>${escapeHtml(challenge.category)}</td>
       <td>${challenge.points}</td>
       <td>
-        <button type="button">Edit</button>
+        <label class="toggle-switch" title="${visible ? 'visible' : 'hidden'}">
+          <input type="checkbox" data-toggle-hidden="${challenge.id}" ${visible ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </label>
+      </td>
+      <td>
+        <button type="button" data-edit-challenge="${challenge.id}">Edit</button>
         <button type="button" data-delete-challenge="${challenge.id}">Delete</button>
       </td>
     </tr>
   `;
+}
+
+async function toggleChallengeVisibility(id, isHidden) {
+  try {
+    await api(`/api/admin/challenges/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_hidden: isHidden }),
+    });
+    renderAdminChallenges();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
 async function createChallenge(event) {
@@ -569,7 +615,7 @@ async function createChallenge(event) {
         author: null,
         tags: [],
         unlock_requires: null,
-        is_hidden: false,
+        is_hidden: !('is_visible' in data),
       }),
     });
     await loadChallenges();
@@ -584,6 +630,74 @@ async function deleteChallenge(id) {
     await api(`/api/admin/challenges/${id}`, { method: 'DELETE' });
     await loadChallenges();
     renderAdmin('challenges');
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+function openEditChallengeModal(challenge) {
+  if (!challenge) return;
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `
+    <div class="modal-panel">
+      <button class="modal-close" type="button" aria-label="Close">x</button>
+      <h2>Edit Challenge</h2>
+      <form id="edit-challenge-form" class="admin-form">
+        <label><span>Title</span>
+          <input name="title" value="${escapeHtml(challenge.title)}" required>
+        </label>
+        <label><span>Category</span>
+          <input name="category" value="${escapeHtml(challenge.category)}" required>
+        </label>
+        <label><span>Points</span>
+          <input name="points" type="number" value="${challenge.points}" required>
+        </label>
+        <label><span>New flag (leave blank to keep current)</span>
+          <input name="flag" placeholder="flag{...}" autocomplete="off">
+        </label>
+        <label><span>Description</span>
+          <textarea name="description">${escapeHtml(challenge.description)}</textarea>
+        </label>
+        <label class="toggle-row">
+          <span>Visible</span>
+          <span class="toggle-switch">
+            <input type="checkbox" name="is_visible" ${!challenge.is_hidden ? 'checked' : ''}>
+            <span class="toggle-slider"></span>
+          </span>
+        </label>
+        <button type="submit">Save</button>
+      </form>
+    </div>
+  `;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.querySelector('.modal-close').addEventListener('click', closeModal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeModal();
+  }, { once: true });
+  modal.querySelector('#edit-challenge-form').addEventListener('submit', (event) =>
+    updateChallenge(event, challenge.id),
+  );
+}
+
+async function updateChallenge(event, id) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  const body = {
+    title: data.title,
+    category: data.category,
+    points: Number(data.points),
+    description: data.description || '',
+    is_hidden: !('is_visible' in data),
+  };
+  if (data.flag.trim()) body.flag = data.flag.trim();
+  try {
+    await api(`/api/admin/challenges/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    closeModal();
+    renderAdminChallenges();
   } catch (error) {
     toast(error.message, 'error');
   }

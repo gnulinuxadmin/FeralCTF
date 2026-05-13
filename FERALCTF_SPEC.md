@@ -318,6 +318,7 @@ Submission rate limits are enforced per team and per challenge (see §6.5).
 | GET | `/api/challenges/:id` | Required | Challenge detail, hints (unlocked content), files |
 | POST | `/api/challenges/:id/submit` | Required | Submit flag; rate limited 10/min/team |
 | POST | `/api/challenges/:id/hints/:hid/unlock` | Required | Unlock hint, deduct points |
+| GET | `/api/admin/challenges` | Admin | List all challenges including hidden/draft |
 | POST | `/api/admin/challenges` | Admin | Create challenge |
 | PUT | `/api/admin/challenges/:id` | Admin | Update challenge (live during competition) |
 | DELETE | `/api/admin/challenges/:id` | Admin | Delete challenge |
@@ -798,7 +799,8 @@ feralctf/
 
 ## 10. Implementation Status
 
-The current codebase implements the core v1 platform:
+Current release: **1.0rc5**. All core sprints (0–13) complete. All items below verified against
+`cargo test` (50 tests passing).
 
 ### Core
 
@@ -821,6 +823,17 @@ The current codebase implements the core v1 platform:
 - [x] Frontend SPA (challenges, scoreboard, profile, admin)
 - [x] `rust-embed` frontend bundle
 
+### UI / UX
+
+- [x] Web-based user registration form (no out-of-band setup required)
+- [x] Admin navigation shown only to admin-role accounts
+- [x] Themed error page for unknown routes (404 and other HTTP error codes)
+- [x] Challenge cards — category color, difficulty dot, solve count, solved marker
+- [x] Category filter pills and title search on challenge grid
+- [x] Challenge visibility toggle (publish / hide) in admin panel
+- [x] Frontend layout aligned with specification mockups (§12)
+- [x] Brand icon in header
+
 ### Import / Export
 
 - [x] JSON export endpoint (challenges + metadata)
@@ -833,6 +846,7 @@ The current codebase implements the core v1 platform:
 
 ### Admin
 
+- [x] Challenge list endpoint returning all challenges including hidden (`GET /api/admin/challenges`)
 - [x] Competition start / end / freeze controls
 - [x] Announcement broadcast (WebSocket + stored)
 - [x] Submission log (paginated, filterable by team/challenge/result)

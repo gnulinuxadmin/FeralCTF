@@ -1214,5 +1214,40 @@ attachments/         (empty directory)
 
 ---
 
+---
+
+## Post-Sprint 13 — v1.0rc Improvements
+
+Sprints 0–13 are complete. The following improvements were made during the 1.0rc series
+(1.0rc1–1.0rc5) after sprint completion. They are implemented in the existing sprint files;
+no new sprint scope is required.
+
+### Frontend
+
+- **Web registration UI** — `showRegisterModal()` and `registerUser()` added to `frontend/app.js`.
+  Users can register directly from the browser; no out-of-band admin setup required.
+- **Admin nav gating** — `updateAdminNav()` in `frontend/app.js` adds the Admin nav button only
+  when the authenticated user has `role === 'admin'`. Non-admin accounts never see admin routes.
+- **Themed error page** — `error_page()` in `src/routes.rs` returns a styled HTML error response
+  for unknown routes. The SPA fallback was removed; asset paths in `frontend/index.html` changed
+  to absolute to prevent resolution errors when served from non-root paths.
+- **Challenge card layout** — `challengeCard()` updated with `.card-top / .card-bottom` structure,
+  difficulty dot, category color, solve count, and solved marker.
+- **Category filter pills** — `.cat-pill` buttons replace the old category `<select>` element.
+- **Scoreboard polish** — rank medals (🥇🥈🥉), progress bar, current-team highlight.
+- **Brand icon** — `feral10.jpg` (pixel-art squirrel) rendered in the topbar via `.brand-icon`.
+- **Layout** — topbar, nav, auth-form, user-info, admin sidebar, and card grid CSS updated to
+  match the §12 specification mockups.
+
+### Backend
+
+- **`GET /api/admin/challenges`** — added to `src/handlers/admin.rs` using `Challenge::list_all()`.
+  The existing player endpoint (`GET /api/challenges`) uses `Challenge::list_visible()` and is
+  unchanged. Admin UI now fetches from the admin endpoint so hidden challenges are visible.
+- **Route wiring** — `src/routes.rs` wires `list_admin_challenges` on `GET /api/admin/challenges`
+  (previously only `POST` was registered on that path).
+
+---
+
 *End of sprint definitions.*
 *FeralCTF — Apache 2.0 · CyberSquirrels CTF Team*
