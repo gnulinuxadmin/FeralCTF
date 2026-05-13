@@ -1,8 +1,6 @@
 # FeralCTF — Technical Specification v1.0
 
-<p align="center">
-  <img src="feral10.jpg" alt="FeralCTF logo" width="260" height="360">
-</p>
+![FeralCTF logo](feral10.jpg)
 
 
 > **Purpose of this document:** Complete implementation specification for the FeralCTF platform.
@@ -14,9 +12,9 @@
 ## 0. Project Summary
 
 FeralCTF is a self-hosted Capture the Flag competition platform targeting non-profit and academic
-competitions that run on minimal infrastructure. The entire platform ships as a **single
-statically-linked binary** that embeds all frontend assets and requires no external runtime
-dependencies (no Docker, no Node.js, no Python, no database server).
+competitions that run on minimal infrastructure. The platform ships as a **single binary** that
+embeds frontend assets and schema migrations and requires no external runtime dependencies
+(no Docker, no Node.js, no Python, no database server).
 
 **Primary constraints:**
 - Binary size: < 15 MB
@@ -25,7 +23,8 @@ dependencies (no Docker, no Node.js, no Python, no database server).
 - CPU: runs on 1–2 vCPU comfortably
 - Storage: < 10 MB database for a 500-team / 50-challenge competition
 
-**Feature target:** Full parity with CTFd and Mellivora for small-to-medium competitions.
+**Feature target:** Core CTFd-style workflows for small-to-medium competitions with a simpler
+single-binary operational model.
 
 ---
 
@@ -35,44 +34,43 @@ dependencies (no Docker, no Node.js, no Python, no database server).
 
 - **Language:** Rust (stable toolchain, minimum 1.75)
 - **Async runtime:** Tokio (multi-threaded, work-stealing)
-- **Web framework:** Axum 0.7.x
+- **Web framework:** Axum 0.8.x
 
 No other runtime is required. The binary is fully self-contained.
 
 ### 1.2 Database
 
-- **Engine:** SQLite via `sqlx` 0.7.x
+- **Engine:** SQLite via `rusqlite` + `r2d2_sqlite`
 - **Mode:** WAL (Write-Ahead Logging) + `synchronous=NORMAL`
-- **Connection pool:** 1 write connection + 8 read connections
+- **Connection pool:** `r2d2` pool of SQLite connections
 - **Rationale:** CTF workloads are ~95% reads. WAL allows unlimited concurrent readers with a
   single non-blocking writer. SQLite is adequate; no Postgres/MySQL needed.
-- **Backup:** `sqlite3 ctf.db ".backup ctf-backup.db"` — hot backup, zero downtime
-- **Alternative backend:** JSON flat-file driver toggled via `FERALCTF_BACKEND=json` for
-  ephemeral workshop/demo deployments where persistence is not required.
+- **Backup:** SQLite backup API via `GET /api/admin/backup`; `sqlite3 ctf.db ".backup ..."` also works operationally.
+- **Alternative backend:** None in the current implementation. SQLite is the supported storage engine.
 
 ### 1.3 Key Crates
 
 | Crate | Version | Purpose |
 |---|---|---|
-| axum | 0.7.x | HTTP router, handlers, middleware |
+| axum | 0.8.x | HTTP router, handlers, middleware |
 | tokio | 1.x | Async runtime |
-| sqlx | 0.7.x | SQLite async queries (compile-time verified) |
-| rusqlite | 0.31.x | SQLite backup, VACUUM, admin ops |
+| rusqlite | 0.32.x | SQLite queries, migrations, backup |
+| r2d2 / r2d2_sqlite | 0.8.x / 0.25.x | SQLite connection pooling |
 | rust-embed | 8.x | Embed frontend assets into binary at build time |
 | argon2 | 0.5.x | Password hashing (Argon2id) |
-| jsonwebtoken | 9.x | JWT auth (HS256) |
+| jsonwebtoken | 10.x | JWT auth (HS256) |
 | serde / serde_json | 1.x | JSON serialization, import/export |
-| tower-http | 0.5.x | CORS, compression, rate limiting middleware |
+| tower-http | 0.6.x | CORS, compression, security-related middleware |
 | tracing | 0.1.x | Structured JSON logging |
-| zip | 0.6.x | Challenge file attachment packaging |
-| dashmap | 5.x | In-process concurrent cache (scoreboard, sessions) |
+| zip | 8.x | Challenge file attachment packaging |
+| dashmap | 6.x | Supporting concurrent maps where needed |
 
 ### 1.4 Frontend
 
 - **Stack:** Vanilla JavaScript SPA + custom CSS. No React, Vue, or build pipeline.
 - **Delivery:** Embedded into the binary via `rust-embed` at compile time.
 - **Bundle size:** < 200 KB uncompressed, < 60 KB gzipped
-- **Real-time:** WebSocket for live scoreboard → fallback SSE → fallback 30s polling
+- **Real-time:** WebSocket for live scoreboard events; clients may fall back to polling `/api/scoreboard`
 - **Theme:** Dark terminal aesthetic (monospace throughout), light mode toggle available
 - **Responsive:** Yes — mobile-friendly for on-site competitions
 
@@ -80,12 +78,14 @@ No other runtime is required. The binary is fully self-contained.
 
 ## 2. Architecture
 
+![FeralCTF system architecture](docs/assets/feralctf-architecture.png)
+
 ### 2.1 Process Model
 
 FeralCTF runs as a **single OS process**. All subsystems run inside one Tokio runtime:
 
 ```
-feralctf [--config config.toml] [--port 8080] [--db ./ctf.db]
+feralctf [--config config.toml] [--port 8080]
 ```
 
 On startup the binary:
@@ -93,10 +93,9 @@ On startup the binary:
 2. Loads `config.toml` (or environment variable overrides)
 3. Starts Axum HTTP server on configured port
 4. Starts background workers:
-   - Scoreboard cache refresh
+   - Score history snapshot task
    - Submission rate limiter GC (every 60s)
    - WebSocket broadcast hub
-   - WAL checkpoint scheduler
 
 ### 2.2 Caching
 
@@ -105,21 +104,21 @@ cache misses.
 
 | Cache | Type | Invalidation |
 |---|---|---|
-| Scoreboard | `Arc<RwLock<ScoreboardState>>` | On every accepted flag submission |
-| Challenge list | `Arc<RwLock<Vec<Challenge>>>` | On admin challenge create/update/delete |
-| User sessions | `DashMap<TokenHash, Session>` | TTL-based, 15 min, with JWT refresh |
-| Rate limit counters | `DashMap<IpAddr, RateBucket>` | GC every 60s |
+| Scoreboard | `RwLock<Option<ScoreboardState>>` | On accepted flag submission and score-affecting admin/team actions |
+| Challenge list | `RwLock<Option<Vec<Challenge>>>` | On admin challenge create/update/delete |
+| User sessions | SQLite `sessions` table | TTL-based with server-side revocation |
+| Rate limit counters | In-memory `RateLimiter` state | GC every 60s |
 
 ### 2.3 Request Latency Targets
 
 | Layer | Component | Target |
 |---|---|---|
 | TLS | Reverse proxy (nginx/Caddy) — not built-in | < 1 ms |
-| Rate limiting | Tower middleware, per-IP sliding window | < 0.1 ms |
+| Rate limiting | In-process team/challenge submission limiter | < 0.1 ms |
 | Auth | JWT validation, cache lookup | < 0.5 ms |
 | Handler | Business logic | < 1 ms (cached) |
-| Cache | DashMap read | < 0.1 ms |
-| Database | sqlx SQLite pool | < 5 ms |
+| Cache | in-process lock read | < 0.1 ms |
+| Database | r2d2 SQLite pool | < 5 ms |
 
 ### 2.4 WebSocket Architecture
 
@@ -383,7 +382,6 @@ Rate limits are enforced per-IP via Tower middleware.
 | POST | `/api/admin/competition/start` | Admin | Start competition |
 | POST | `/api/admin/competition/end` | Admin | End competition |
 | POST | `/api/admin/competition/freeze` | Admin | Freeze scoreboard |
-| GET | `/api/admin/stats` | Admin | RAM, CPU, active connections |
 
 ---
 
@@ -553,15 +551,15 @@ Target: ~300 ms per hash on the deployment target. Tune `memory` up/down to hit 
 - JWT HS256 signed with a server-generated secret (stored in config, not DB)
 - Server-side revocation via `sessions` table (token_hash column)
 - Default TTL: 24 hours for players, 4 hours for admin tokens
-- Admin tokens require re-authentication for destructive operations (delete, disqualify, backup)
-- All admin actions logged: `user_id`, `action`, `target`, `timestamp`, `ip`
+- Admin routes require an admin-role JWT and a valid non-revoked session.
+- Admin management actions are logged with `user_id`, `action`, `target`, `detail`, `ip_address`, and `created_at`.
 
 ### 6.4 Input Validation
 
-- All SQL via `sqlx` parameterized queries — SQL injection not possible
-- File uploads: extension allowlist, magic byte validation, 100 MB size limit, stored outside webroot
+- All SQL uses `rusqlite` parameter binding (`params!` or equivalent).
+- File attachments are stored outside the embedded frontend assets; import/export attachment ZIP handling is supported.
 - Flag submissions: max 256 chars, stripped of leading/trailing whitespace
-- Challenge descriptions: Markdown input, HTML-sanitized on client render (no stored XSS)
+- Public challenge response types do not include flag hashes or salts.
 - All API inputs validated via `serde` + custom validators before handler logic
 
 ### 6.5 Anti-Cheat
@@ -569,7 +567,7 @@ Target: ~300 ms per hash on the deployment target. Tune `memory` up/down to hit 
 - Submission rate limit: 10 attempts/minute per team (configurable)
 - Exponential backoff after 5 wrong attempts per challenge per team
 - Flag sharing detection: same correct flag submitted by 2+ teams within configurable window → alert
-- All submissions log IP address for forensic analysis
+- Submissions record IP address when available from request headers.
 - Flag rotation: admin can update a challenge flag mid-competition; old hash invalidated immediately
 
 ### 6.6 HTTP Security Headers
@@ -582,6 +580,8 @@ Referrer-Policy: strict-origin-when-cross-origin
 Content-Security-Policy: default-src 'self'
 ```
 
+The implemented CSP also allows WebSocket connections to same-origin `ws:`/`wss:` endpoints for live scoreboard updates.
+
 ---
 
 ## 7. Configuration
@@ -593,6 +593,7 @@ Full `config.toml` reference:
 port = 8080
 host = "0.0.0.0"
 base_url = "https://ctf.yourdomain.com"
+allowed_origins = []                         # optional CORS allowlist
 
 [competition]
 name = "FeralCTF 2026"
@@ -621,6 +622,7 @@ max_file_size_mb = 100
 submissions_per_minute = 10
 wrong_attempts_before_backoff = 5
 backoff_base_seconds = 30
+flag_sharing_window_seconds = 300
 
 [notifications]
 discord_webhook_url = ""                     # optional, for first blood + announcements
@@ -634,6 +636,7 @@ All config values can be overridden with environment variables using the prefix 
 
 ```bash
 FERALCTF_SERVER_PORT=9090
+FERALCTF_SERVER_ALLOWED_ORIGINS=https://ctf.yourdomain.com
 FERALCTF_DATABASE_PATH=/data/ctf.db
 FERALCTF_AUTH_JWT_SECRET=supersecret
 ```
@@ -718,18 +721,16 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" \
 - Rust stable 1.75+
 - `cargo` (bundled with Rust)
 - Optional: `cargo-watch` for dev hot-reload
-- Optional: `sqlx-cli` for migration management
 
 ### 9.2 Commands
 
 ```bash
 cargo run                                               # dev build + run
-cargo build --release                                   # optimized release (~10 MB)
-cargo build --release --target x86_64-unknown-linux-musl  # fully static musl binary
+cargo build --release                                   # optimized release
 cargo run -- migrate                                    # run DB migrations
 cargo run -- import challenges.json --dry-run           # validate import bundle
 cargo test                                              # run test suite
-cargo test --test integration                           # integration tests only
+cargo clippy --all-targets --all-features               # lint all targets
 ```
 
 ### 9.3 Project Structure
@@ -737,12 +738,10 @@ cargo test --test integration                           # integration tests only
 ```
 feralctf/
   src/
-    main.rs                 # startup, config loading, signal handling
+    main.rs                 # CLI parsing, init/migrate/import, server startup
     config.rs               # Config struct, env var overrides, validation
     db/
       mod.rs                # connection pool setup, migration runner
-      schema.sql            # canonical schema (source of truth)
-      migrations/           # versioned .sql migration files
     handlers/
       auth.rs               # register, login, logout, me, password
       challenges.rs         # list, detail, submit, hint unlock
@@ -757,7 +756,7 @@ feralctf/
     cache.rs                # in-process cache types and invalidation logic
     scoring.rs              # dynamic scoring formula, score recalculation
     anticheat.rs            # rate limiting, flag sharing detection, backoff
-    storage.rs              # file attachment upload, validation, serving
+    storage.rs              # file storage helpers
     import_export.rs        # JSON export, JSON import, CTFd compat adapter
     auth.rs                 # JWT signing/verification, Argon2id hashing
     errors.rs               # unified error types, HTTP error responses
@@ -767,75 +766,70 @@ feralctf/
     style.css               # dark terminal theme
   migrations/
     001_initial.sql
-    002_score_history.sql
+    002_audit_log.sql
   Cargo.toml
-  config.example.toml
   README.md
 ```
 
 ---
 
-## 10. Feature Checklist
+## 10. Implementation Status
 
-Use this as a task tracker for implementation.
+The current codebase implements the core v1 platform:
 
 ### Core
-- [ ] SQLite schema + migrations
-- [ ] Config loading (file + env var override)
-- [ ] Argon2id password hashing
-- [ ] JWT auth (sign, verify, revoke)
-- [ ] User registration + login
-- [ ] Team creation + invite-code join
-- [ ] Challenge CRUD (admin)
-- [ ] Challenge list endpoint (with solve status per team)
-- [ ] Flag submission (static)
-- [ ] Flag submission (regex)
-- [ ] Dynamic scoring formula
-- [ ] Hint unlock (deduct points)
-- [ ] File attachment upload + serve
-- [ ] Scoreboard (cached, sorted, tiebreak by last_solve_at)
-- [ ] Score history sampling (5 min interval background task)
-- [ ] WebSocket hub + event broadcast
-- [ ] Rate limiting middleware (per-IP)
-- [ ] Submission backoff (per-team per-challenge)
-- [ ] Frontend SPA (challenges, scoreboard, profile, admin)
-- [ ] rust-embed frontend bundle
+- [x] SQLite schema + embedded migrations
+- [x] Config loading (file + environment overrides)
+- [x] Argon2id password hashing
+- [x] JWT auth with server-side session revocation
+- [x] User registration + login
+- [x] Team creation + invite-code join
+- [x] Challenge CRUD (admin)
+- [x] Challenge list endpoint with solve status per team
+- [x] Flag submission (static)
+- [x] Flag submission (regex)
+- [x] Dynamic scoring formula
+- [x] Hint unlock with point deduction
+- [x] Scoreboard cache sorted by score and tiebreak
+- [x] Score history sampling background task
+- [x] WebSocket hub + event broadcast
+- [x] Submission rate limiting and backoff
+- [x] Frontend SPA (challenges, scoreboard, profile, admin)
+- [x] `rust-embed` frontend bundle
 
 ### Import / Export
-- [ ] JSON export endpoint (challenges + metadata)
-- [ ] JSON export with inline base64 attachments
-- [ ] JSON export with companion ZIP
-- [ ] JSON import endpoint (dry-run mode)
-- [ ] JSON import conflict resolution (skip / overwrite)
-- [ ] CTFd export format detection + adapter
-- [ ] CLI import subcommand (`feralctf import`)
+- [x] JSON export endpoint (challenges + metadata)
+- [x] JSON export with inline base64 attachments
+- [x] JSON export with companion ZIP
+- [x] JSON import endpoint (dry-run mode)
+- [x] JSON import conflict resolution (skip / overwrite)
+- [x] CTFd export format detection + adapter
+- [x] CLI import subcommand (`feralctf import`)
 
 ### Admin
-- [ ] Competition start / end / freeze controls
-- [ ] Announcement broadcast (WebSocket + stored)
-- [ ] Submission log (paginated, filterable by team/challenge/result)
-- [ ] User ban
-- [ ] Team disqualify (zero score, hide)
-- [ ] Challenge flag rotation (invalidate old hash)
-- [ ] Score rollback (reject a solve, recalculate)
-- [ ] Database backup download endpoint
-- [ ] Resource stats endpoint (RAM, CPU, connections)
+- [x] Competition start / end / freeze controls
+- [x] Announcement broadcast (WebSocket + stored)
+- [x] Submission log (paginated, filterable by team/challenge/result)
+- [x] User ban
+- [x] Team disqualify
+- [x] Challenge flag update through challenge update
+- [x] Database backup download endpoint
 
 ### Security
-- [ ] HTTP security headers (Tower middleware)
-- [ ] Flag storage as salted hash (never plaintext in DB)
-- [ ] Admin action audit log
-- [ ] IP logging on all submissions
-- [ ] Flag sharing detection alert
-- [ ] File upload validation (extension allowlist + magic bytes)
+- [x] HTTP security headers
+- [x] Configurable CORS allowlist
+- [x] Flag storage as salted hash for static flags
+- [x] Admin action audit log
+- [x] IP logging on submissions when request headers provide an IP
+- [x] Flag sharing detection alert
 
 ### Deployment
-- [ ] `feralctf init` subcommand (generate config + empty DB)
-- [ ] Systemd service file (in repo as `deploy/feralctf.service`)
-- [ ] Docker image (optional, for users who prefer it)
-- [ ] ARM64 cross-compilation target
-- [ ] GitHub Actions CI (build + test on push)
-- [ ] Release workflow (build static musl binary, attach to GitHub release)
+- [x] `feralctf init` subcommand (generate config + empty DB + attachments directory)
+- [x] `feralctf migrate` subcommand
+- [x] Release build produces a self-contained binary with embedded frontend and migrations
+
+Deferred or optional work remains for service packaging, CI/release automation, multi-architecture
+release artifacts, and advanced attachment validation.
 
 ---
 

@@ -44,6 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn parse_args(mut args: Vec<String>) -> Result<Cli, Box<dyn std::error::Error>> {
+    // FERALCTF_SPEC.md §2.1 / §9.2 define the single-binary command surface.
+    // Keep this parser dependency-free so release builds remain self-contained.
     let mut config_path = "config.toml".to_string();
     let mut port = None;
     let mut index = 0;
@@ -119,6 +121,7 @@ fn parse_import(args: &[String]) -> Result<Command, Box<dyn std::error::Error>> 
 }
 
 fn run_init(config_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // FERALCTF_SPEC.md §8.1: init bootstraps config, SQLite DB, and attachments/.
     let config = default_config();
     std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
     println!("Created: {config_path}");
@@ -158,6 +161,7 @@ async fn run_server(
     config_path: &str,
     port: Option<u16>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // FERALCTF_SPEC.md §2.1: startup loads config, runs migrations, and starts Axum.
     let mut config = feralctf::config::load(config_path)?;
     if let Some(port) = port {
         config.server.port = port;

@@ -1,5 +1,5 @@
 // FeralCTF - Database module
-// Sprint 1: r2d2 connection pool, WAL mode init, migration runner.
+// Implements the SQLite/WAL storage model described in FERALCTF_SPEC.md §1.2.
 
 pub mod connection;
 pub mod queries;
@@ -40,6 +40,8 @@ pub fn audit(
     detail: Option<&str>,
     ip: Option<&str>,
 ) -> Result<(), Error> {
+    // FERALCTF_SPEC.md §6.3: admin actions are recorded with actor, action,
+    // target, timestamp, and IP when available.
     conn.execute(
         "INSERT INTO audit_log (user_id, action, target, detail, ip_address, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",

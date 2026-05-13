@@ -103,6 +103,7 @@ fn cors_layer(state: &AppState) -> CorsLayer {
 }
 
 async fn security_headers(request: Request, next: Next) -> Response {
+    // FERALCTF_SPEC.md §6.6 requires these headers on every response.
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert(
@@ -122,6 +123,8 @@ async fn security_headers(request: Request, next: Next) -> Response {
 }
 
 async fn frontend(uri: Uri) -> Response {
+    // FERALCTF_SPEC.md §1.4: the vanilla JS SPA is embedded in the binary.
+    // Non-API paths fall back to index.html so browser-side routing works.
     let path = uri.path().trim_start_matches('/');
     if path.starts_with("api/") || path == "ws" {
         return StatusCode::NOT_FOUND.into_response();
