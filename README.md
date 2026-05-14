@@ -39,6 +39,12 @@ see [§11 Out of Scope](FERALCTF_SPEC.md) for deferred items.
 
 ## Quick Start
 
+Actual production deployments should see the deployment section of the specification for serving behind
+a reverse proxy that handles SSL/TLS and certificate management. [Deployment Notes](https://github.com/gnulinuxadmin/FeralCTF/blob/main/FERALCTF_SPEC.md#8-deployment) 
+
+This quick started is intended to allow you to try FeralCTF out locally or stage the challenges locally
+to move to a server hosting FeralCTF when you publish the game.
+
 Build or download the `feralctf` binary, then initialize a working directory:
 
 ```bash
