@@ -35,17 +35,20 @@ pub fn recalculate_all_team_scores(conn: &DbConn) -> Result<(), AppError> {
     conn.execute(
         "UPDATE teams
          SET score =
-            COALESCE((
-                SELECT SUM(c.points)
-                FROM solves s
-                JOIN challenges c ON c.id = s.challenge_id
-                WHERE s.team_id = teams.id
-            ), 0)
-            - COALESCE((
-                SELECT SUM(points_deducted)
-                FROM hint_unlocks hu
-                WHERE hu.team_id = teams.id
-            ), 0)",
+            CASE
+                WHEN is_disqualified = 1 THEN 0
+                ELSE COALESCE((
+                    SELECT SUM(c.points)
+                    FROM solves s
+                    JOIN challenges c ON c.id = s.challenge_id
+                    WHERE s.team_id = teams.id
+                ), 0)
+                - COALESCE((
+                    SELECT SUM(points_deducted)
+                    FROM hint_unlocks hu
+                    WHERE hu.team_id = teams.id
+                ), 0)
+            END",
         [],
     )?;
     Ok(())

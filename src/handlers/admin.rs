@@ -99,6 +99,16 @@ pub struct ImportQuery {
     pub dry_run: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserRoleRequest {
+    pub role: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateTeamDisqualifiedRequest {
+    pub is_disqualified: bool,
+}
+
 // ---- admin auth middleware ----
 
 pub async fn require_admin(
@@ -467,6 +477,10 @@ pub async fn ban_user(
     if rows == 0 {
         return Err(AppError::NotFound("user not found or is admin".into()));
     }
+    conn.execute(
+        "UPDATE sessions SET revoked = 1 WHERE user_id = ?1",
+        rusqlite::params![id],
+    )?;
     let (admin_id, ip) = admin_audit_context(&state, &headers)?;
     crate::db::audit(
         &conn,
@@ -479,6 +493,81 @@ pub async fn ban_user(
     Ok(Json(serde_json::json!({ "banned": true })))
 }
 
+pub async fn update_user_role(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(req): Json<UpdateUserRoleRequest>,
+) -> HandlerResult<Json<UserPublic>> {
+    let role = req.role.trim();
+    if !matches!(role, "admin" | "player" | "banned") {
+        return Err(AppError::BadRequest(
+            "role must be admin, player, or banned".into(),
+        ));
+    }
+
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let existing_role = conn
+        .query_row(
+            "SELECT role FROM users WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound("user not found".into()),
+            other => AppError::Database(other),
+        })?;
+
+    if existing_role == "admin" && role != "admin" {
+        let admin_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM users WHERE role = 'admin'",
+            [],
+            |row| row.get(0),
+        )?;
+        if admin_count <= 1 {
+            return Err(AppError::BadRequest(
+                "cannot remove the last admin account".into(),
+            ));
+        }
+    }
+
+    conn.execute(
+        "UPDATE users SET role = ?1 WHERE id = ?2",
+        rusqlite::params![role, id],
+    )?;
+    conn.execute(
+        "UPDATE sessions SET revoked = 1 WHERE user_id = ?1",
+        rusqlite::params![id],
+    )?;
+
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "user.role_update",
+        Some(&format!("user:{id}")),
+        Some(&format!("{existing_role}->{role}")),
+        ip.as_deref(),
+    )?;
+
+    let user = conn.query_row(
+        "SELECT id, username, role, team_id FROM users WHERE id = ?1",
+        rusqlite::params![id],
+        |row| {
+            Ok(UserPublic {
+                id: row.get(0)?,
+                username: row.get(1)?,
+                role: row.get(2)?,
+                team_id: row.get(3)?,
+            })
+        },
+    )?;
+    Ok(Json(user))
+}
+
 // ---- team management ----
 
 pub async fn get_teams(State(state): State<AppState>) -> HandlerResult<Json<Vec<Team>>> {
@@ -487,7 +576,7 @@ pub async fn get_teams(State(state): State<AppState>) -> HandlerResult<Json<Vec<
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
     let mut stmt = conn.prepare(
-        "SELECT id, name, invite_code, score, last_solve_at FROM teams ORDER BY score DESC",
+        "SELECT id, name, invite_code, score, last_solve_at, is_disqualified FROM teams ORDER BY score DESC",
     )?;
     let teams = stmt
         .query_map([], |row| {
@@ -497,6 +586,7 @@ pub async fn get_teams(State(state): State<AppState>) -> HandlerResult<Json<Vec<
                 invite_code: row.get(2)?,
                 score: row.get(3)?,
                 last_solve_at: row.get(4)?,
+                is_disqualified: row.get::<_, i64>(5)? != 0,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -508,29 +598,67 @@ pub async fn disqualify_team(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> HandlerResult<Json<serde_json::Value>> {
+    let Json(result) = update_team_disqualified(
+        State(state),
+        headers,
+        Path(id),
+        Json(UpdateTeamDisqualifiedRequest {
+            is_disqualified: true,
+        }),
+    )
+    .await?;
+    Ok(Json(serde_json::json!({
+        "disqualified": result.is_disqualified
+    })))
+}
+
+pub async fn update_team_disqualified(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(req): Json<UpdateTeamDisqualifiedRequest>,
+) -> HandlerResult<Json<Team>> {
     let conn = state
         .db
         .get()
         .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let existing: i64 = conn
+        .query_row(
+            "SELECT is_disqualified FROM teams WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .map_err(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound("team not found".into()),
+            other => AppError::Database(other),
+        })?;
+    let new_value = i64::from(req.is_disqualified);
     let rows = conn.execute(
-        "UPDATE teams SET score = 0, last_solve_at = NULL, is_disqualified = 1 WHERE id = ?1",
-        rusqlite::params![id],
+        "UPDATE teams SET is_disqualified = ?1, last_solve_at = CASE WHEN ?1 = 1 THEN NULL ELSE last_solve_at END WHERE id = ?2",
+        rusqlite::params![new_value, id],
     )?;
     if rows == 0 {
         return Err(AppError::NotFound("team not found".into()));
     }
     scoring::recalculate_all_team_scores(&conn)?;
     let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    let action = if req.is_disqualified {
+        "team.disqualify"
+    } else {
+        "team.reinstate"
+    };
     crate::db::audit(
         &conn,
         admin_id,
-        "team.disqualify",
+        action,
         Some(&format!("team:{id}")),
-        None,
+        Some(&format!("{}->{}", existing != 0, req.is_disqualified)),
         ip.as_deref(),
     )?;
     state.cache.invalidate_scoreboard();
-    Ok(Json(serde_json::json!({ "disqualified": true })))
+    let team = Team::find_by_id(&conn, id)?
+        .ok_or_else(|| anyhow::anyhow!("team not found after update"))?;
+    Ok(Json(team))
 }
 
 // ---- competition controls ----
@@ -1032,6 +1160,162 @@ mod tests {
             )
             .unwrap();
         assert_eq!(role, "banned");
+    }
+
+    #[tokio::test]
+    async fn update_user_role_promotes_demotes_bans_and_unbans() {
+        let state = test_state();
+        let conn = state.db.get().unwrap();
+        let req = RegisterRequest {
+            username: "role-target".to_string(),
+            email: None,
+            password: "password123".to_string(),
+            team_name: None,
+            invite_code: None,
+        };
+        let user = User::create(&conn, &req, "hash").unwrap();
+        drop(conn);
+
+        let headers = admin_headers(&state);
+        let Json(promoted) = update_user_role(
+            State(state.clone()),
+            headers.clone(),
+            Path(user.id),
+            Json(UpdateUserRoleRequest {
+                role: "admin".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(promoted.role, "admin");
+
+        let Json(demoted) = update_user_role(
+            State(state.clone()),
+            headers.clone(),
+            Path(user.id),
+            Json(UpdateUserRoleRequest {
+                role: "player".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(demoted.role, "player");
+
+        let Json(banned) = update_user_role(
+            State(state.clone()),
+            headers.clone(),
+            Path(user.id),
+            Json(UpdateUserRoleRequest {
+                role: "banned".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(banned.role, "banned");
+
+        let Json(unbanned) = update_user_role(
+            State(state),
+            headers,
+            Path(user.id),
+            Json(UpdateUserRoleRequest {
+                role: "player".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(unbanned.role, "player");
+    }
+
+    #[tokio::test]
+    async fn update_user_role_rejects_removing_last_admin() {
+        let state = test_state();
+        let headers = admin_headers(&state);
+        let admin_id: i64 = {
+            let conn = state.db.get().unwrap();
+            conn.query_row(
+                "SELECT id FROM users WHERE username = 'user-admin'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        let result = update_user_role(
+            State(state),
+            headers,
+            Path(admin_id),
+            Json(UpdateUserRoleRequest {
+                role: "player".to_string(),
+            }),
+        )
+        .await;
+
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn update_team_disqualified_bans_and_reinstates_team_scores() {
+        let state = test_state();
+        {
+            let conn = state.db.get().unwrap();
+            conn.execute(
+                "INSERT INTO teams (id, name, invite_code, score) VALUES (1, 'Toggle Team', 'TOGGLE123', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO users (id, username, password_hash, role, team_id, created_at)
+                 VALUES (42, 'solver', 'hash', 'player', 1, 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO challenges (
+                    id, slug, title, description, category, flag_hash, flag_salt, flag_type,
+                    flag_case_sensitive, points, max_points, min_points, decay_rate, created_at
+                ) VALUES (5, 'toggle', 'Toggle', 'desc', 'misc', 'hash', 'salt', 'static',
+                    0, 250, 250, 50, 12, 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO solves (team_id, user_id, challenge_id, solved_at)
+                 VALUES (1, 42, 5, 10)",
+                [],
+            )
+            .unwrap();
+            scoring::recalculate_all_team_scores(&conn).unwrap();
+            state.cache.get_or_build_scoreboard(&conn).unwrap();
+        }
+        assert!(state.cache.is_scoreboard_cached());
+
+        let headers = admin_headers(&state);
+        let Json(banned) = update_team_disqualified(
+            State(state.clone()),
+            headers.clone(),
+            Path(1),
+            Json(UpdateTeamDisqualifiedRequest {
+                is_disqualified: true,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(banned.is_disqualified);
+        assert_eq!(banned.score, 0);
+        assert!(!state.cache.is_scoreboard_cached());
+
+        let Json(reinstated) = update_team_disqualified(
+            State(state),
+            headers,
+            Path(1),
+            Json(UpdateTeamDisqualifiedRequest {
+                is_disqualified: false,
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(!reinstated.is_disqualified);
+        assert_eq!(reinstated.score, 250);
     }
 
     #[tokio::test]

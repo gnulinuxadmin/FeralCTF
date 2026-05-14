@@ -3,7 +3,7 @@ use crate::handlers::admin::{
     announce, backup, ban_user, competition_end, competition_freeze, competition_start,
     create_challenge, dashboard, delete_challenge, disqualify_team, export_bundle, get_teams,
     get_users, import_bundle, list_admin_challenges, list_submissions, require_admin,
-    update_challenge,
+    update_challenge, update_team_disqualified, update_user_role,
 };
 use crate::handlers::auth::{change_password, login, logout, me, register};
 use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
@@ -45,8 +45,13 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/admin/submissions", get(list_submissions))
         .route("/api/admin/users", get(get_users))
         .route("/api/admin/users/{id}/ban", post(ban_user))
+        .route("/api/admin/users/{id}/role", put(update_user_role))
         .route("/api/admin/teams", get(get_teams))
         .route("/api/admin/teams/{id}/disqualify", post(disqualify_team))
+        .route(
+            "/api/admin/teams/{id}/disqualified",
+            put(update_team_disqualified),
+        )
         .route("/api/admin/competition/start", post(competition_start))
         .route("/api/admin/competition/end", post(competition_end))
         .route("/api/admin/competition/freeze", post(competition_freeze))
@@ -327,6 +332,8 @@ mod tests {
         let html = render_index_html("/server/feralctf").expect("embedded index");
 
         assert!(html.contains(r#"href="/server/feralctf/style.css""#));
+        assert!(html.contains(r#"href="/server/feralctf/favicon.ico""#));
+        assert!(html.contains(r#"href="/server/feralctf/favicon.png""#));
         assert!(html.contains(r#"src="/server/feralctf/app.js""#));
         assert!(html.contains(r#"name="feralctf-base-path" content="/server/feralctf""#));
         assert!(!html.contains("window.FERALCTF_BASE_PATH"));
@@ -337,6 +344,8 @@ mod tests {
         let html = render_index_html("").expect("embedded index");
 
         assert!(html.contains(r#"href="/style.css""#));
+        assert!(html.contains(r#"href="/favicon.ico""#));
+        assert!(html.contains(r#"href="/favicon.png""#));
         assert!(html.contains(r#"src="/app.js""#));
         assert!(html.contains(r#"name="feralctf-base-path" content="""#));
         assert!(!html.contains("window.FERALCTF_BASE_PATH"));
@@ -362,6 +371,8 @@ mod tests {
         let html = String::from_utf8(body.to_vec()).expect("utf8");
 
         assert!(html.contains(r#"href="/server/feralctf/style.css""#));
+        assert!(html.contains(r#"href="/server/feralctf/favicon.ico""#));
+        assert!(html.contains(r#"href="/server/feralctf/favicon.png""#));
         assert!(html.contains(r#"src="/server/feralctf/app.js""#));
         assert!(html.contains(r#"name="feralctf-base-path" content="/server/feralctf""#));
         assert!(!html.contains("window.FERALCTF_BASE_PATH"));
@@ -457,6 +468,25 @@ mod tests {
             app_js_response.headers().get(header::CACHE_CONTROL),
             Some(&HeaderValue::from_static("no-cache"))
         );
+    }
+
+    #[tokio::test]
+    async fn prefixed_favicon_assets_are_embedded() {
+        let app = create_router(test_state("https://server.tld/feralctf/"));
+
+        for path in ["/feralctf/favicon.ico", "/feralctf/favicon.png"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .body(Body::empty())
+                        .expect("request"),
+                )
+                .await
+                .expect("favicon response");
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+        }
     }
 
     #[tokio::test]

@@ -1237,6 +1237,8 @@ no new sprint scope is required.
 - **Category filter pills** — `.cat-pill` buttons replace the old category `<select>` element.
 - **Scoreboard polish** — rank medals (🥇🥈🥉), progress bar, current-team highlight.
 - **Brand icon** — `images/feral10.jpg` (pixel-art squirrel) rendered in the topbar via `.brand-icon`.
+- **Favicon** — `frontend/favicon.png` and `frontend/favicon.ico` generated from the approved feral10-based
+  favicon preview and referenced from `frontend/index.html` through the rendered base path.
 - **Layout** — topbar, nav, auth-form, user-info, admin sidebar, and card grid CSS updated to
   match the §12 specification mockups.
 - **Reverse-proxy base path support** — `src/routes.rs` derives a normalized path prefix from
@@ -1247,6 +1249,11 @@ no new sprint scope is required.
   also infer the prefix from the loaded `/feralctf/app.js` script URL. `index.html`, `app.js`,
   and `style.css` are served with `Cache-Control: no-cache` to revalidate prefix-aware frontend
   assets after deploys.
+- **Admin user/team toggles** — Admin → Users now exposes exclusive Admin and Ban toggle sliders backed by
+  `PUT /api/admin/users/{id}/role`; role changes audit `user.role_update`, revoke the target user's sessions,
+  and reject removing the last admin. Admin → Teams now exposes a Ban toggle backed by
+  `PUT /api/admin/teams/{id}/disqualified`, using existing `is_disqualified` semantics with score recalculation,
+  scoreboard cache invalidation, and `team.disqualify` / `team.reinstate` audit actions.
 
 ### Backend
 

@@ -339,6 +339,15 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   accepts prefixed API/static requests when a proxy forwards the mount path unchanged, e.g.
   `/feralctf/api/...`. `index.html`, `app.js`, and `style.css` use `Cache-Control: no-cache` so
   deploys revalidate the prefix-aware shell and frontend logic.
+- **Favicon assets** — `frontend/favicon.png` and `frontend/favicon.ico` were generated from the approved
+  feral10-based icon preview. `frontend/index.html` references both through the rendered `{{BASE_PATH}}`
+  prefix so favicon requests work at root and behind reverse-proxy path mounts.
+- **Admin role/team toggles** — Admin user management now uses exclusive Admin and Ban toggle sliders backed by
+  `PUT /api/admin/users/{id}/role` with roles `admin`, `player`, or `banned`. The endpoint rejects removing the
+  final admin account, revokes the target user's sessions after role changes, and audits `user.role_update`.
+  Admin team management now uses a Ban toggle backed by `PUT /api/admin/teams/{id}/disqualified`; this maps to
+  existing `teams.is_disqualified`, recalculates scores, invalidates the scoreboard cache, and audits
+  `team.disqualify` / `team.reinstate`.
 
 ## Known Cautions
 

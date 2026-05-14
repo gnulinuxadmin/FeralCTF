@@ -710,6 +710,15 @@ label span {
   background: var(--accent);
 }
 
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 .toggle-row {
   display: flex;
   align-items: center;

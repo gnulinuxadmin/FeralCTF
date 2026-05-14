@@ -793,15 +793,53 @@ async function renderAdminUsers() {
   const content = document.getElementById('admin-content');
   try {
     const users = await api('/api/admin/users');
-    content.innerHTML = tableView('Users', ['ID', 'Username', 'Role', 'Team', 'Actions'], users.map((user) => [
-      user.id,
-      escapeHtml(user.username),
-      escapeHtml(user.role),
-      user.team_id || '-',
-      `<button type="button">Ban</button>`,
-    ]));
+    content.innerHTML = `
+      <h2>Users</h2>
+      <table class="scoreboard">
+        <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Team</th><th>Admin</th><th>Ban</th></tr></thead>
+        <tbody>${users.map(adminUserRow).join('') || '<tr><td colspan="6">No users.</td></tr>'}</tbody>
+      </table>
+    `;
+    document.querySelectorAll('[data-user-admin]').forEach((input) => {
+      input.addEventListener('change', () => {
+        updateUserRole(Number(input.dataset.userAdmin), input.checked ? 'admin' : 'player');
+      });
+    });
+    document.querySelectorAll('[data-user-ban]').forEach((input) => {
+      input.addEventListener('change', () => {
+        updateUserRole(Number(input.dataset.userBan), input.checked ? 'banned' : 'player');
+      });
+    });
   } catch (error) {
     content.innerHTML = emptyState(error.message);
+  }
+}
+
+function adminUserRow(user) {
+  const role = String(user.role || 'player');
+  return `
+    <tr>
+      <td>${user.id}</td>
+      <td>${escapeHtml(user.username)}</td>
+      <td>${escapeHtml(role)}</td>
+      <td>${user.team_id || '-'}</td>
+      <td>${toggleCell('Admin', `data-user-admin="${user.id}"`, role === 'admin')}</td>
+      <td>${toggleCell('Ban', `data-user-ban="${user.id}"`, role === 'banned')}</td>
+    </tr>
+  `;
+}
+
+async function updateUserRole(id, role) {
+  try {
+    await api(`/api/admin/users/${id}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role }),
+    });
+    toast(`user role set to ${role}`);
+    renderAdminUsers();
+  } catch (error) {
+    toast(error.message, 'error');
+    renderAdminUsers();
   }
 }
 
@@ -809,15 +847,61 @@ async function renderAdminTeams() {
   const content = document.getElementById('admin-content');
   try {
     const teams = await api('/api/admin/teams');
-    content.innerHTML = tableView('Teams', ['ID', 'Name', 'Score', 'Actions'], teams.map((team) => [
-      team.id,
-      escapeHtml(team.name),
-      team.score || 0,
-      `<button type="button">Disqualify</button>`,
-    ]));
+    content.innerHTML = `
+      <h2>Teams</h2>
+      <table class="scoreboard">
+        <thead><tr><th>ID</th><th>Name</th><th>Score</th><th>Status</th><th>Ban</th></tr></thead>
+        <tbody>${teams.map(adminTeamRow).join('') || '<tr><td colspan="5">No teams.</td></tr>'}</tbody>
+      </table>
+    `;
+    document.querySelectorAll('[data-team-ban]').forEach((input) => {
+      input.addEventListener('change', () => {
+        updateTeamDisqualified(Number(input.dataset.teamBan), input.checked);
+      });
+    });
   } catch (error) {
     content.innerHTML = emptyState(error.message);
   }
+}
+
+function adminTeamRow(team) {
+  const banned = Boolean(team.is_disqualified);
+  return `
+    <tr>
+      <td>${team.id}</td>
+      <td>${escapeHtml(team.name)}</td>
+      <td>${team.score || 0}</td>
+      <td>${banned ? 'banned' : 'active'}</td>
+      <td>${toggleCell('Ban', `data-team-ban="${team.id}"`, banned)}</td>
+    </tr>
+  `;
+}
+
+async function updateTeamDisqualified(id, isDisqualified) {
+  try {
+    await api(`/api/admin/teams/${id}/disqualified`, {
+      method: 'PUT',
+      body: JSON.stringify({ is_disqualified: isDisqualified }),
+    });
+    await loadScoreboard();
+    toast(isDisqualified ? 'team banned' : 'team unbanned');
+    renderAdminTeams();
+  } catch (error) {
+    toast(error.message, 'error');
+    renderAdminTeams();
+  }
+}
+
+function toggleCell(label, dataAttribute, checked) {
+  return `
+    <label class="toggle-control" title="${label}">
+      <span>${label}</span>
+      <span class="toggle-switch">
+        <input type="checkbox" ${dataAttribute} ${checked ? 'checked' : ''}>
+        <span class="toggle-slider"></span>
+      </span>
+    </label>
+  `;
 }
 
 function renderAdminSettings() {

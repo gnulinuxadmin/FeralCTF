@@ -8,12 +8,13 @@ pub struct Team {
     pub invite_code: String,
     pub score: i64,
     pub last_solve_at: Option<i64>,
+    pub is_disqualified: bool,
 }
 
 impl Team {
     pub fn find_by_id(conn: &DbConn, id: i64) -> Result<Option<Self>, AppError> {
         let result = conn.query_row(
-            "SELECT id, name, invite_code, score, last_solve_at FROM teams WHERE id = ?1",
+            "SELECT id, name, invite_code, score, last_solve_at, is_disqualified FROM teams WHERE id = ?1",
             rusqlite::params![id],
             Self::from_row,
         );
@@ -26,7 +27,7 @@ impl Team {
 
     pub fn find_by_invite_code(conn: &DbConn, code: &str) -> Result<Option<Self>, AppError> {
         let result = conn.query_row(
-            "SELECT id, name, invite_code, score, last_solve_at FROM teams WHERE invite_code = ?1",
+            "SELECT id, name, invite_code, score, last_solve_at, is_disqualified FROM teams WHERE invite_code = ?1",
             rusqlite::params![code],
             Self::from_row,
         );
@@ -76,6 +77,7 @@ impl Team {
             invite_code: row.get(2)?,
             score: row.get(3)?,
             last_solve_at: row.get(4)?,
+            is_disqualified: row.get::<_, i64>(5)? != 0,
         })
     }
 }
