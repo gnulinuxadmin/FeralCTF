@@ -1229,8 +1229,9 @@ no new sprint scope is required.
 - **Admin nav gating** — `updateAdminNav()` in `frontend/app.js` adds the Admin nav button only
   when the authenticated user has `role === 'admin'`. Non-admin accounts never see admin routes.
 - **Themed error page** — `error_page()` in `src/routes.rs` returns a styled HTML error response
-  for unknown routes. The SPA fallback was removed; asset paths in `frontend/index.html` changed
-  to absolute to prevent resolution errors when served from non-root paths.
+  for unknown routes. The SPA fallback was removed; `frontend/index.html` is rendered with the
+  public path prefix derived from `server.base_url`, so reverse-proxy mounts such as
+  `https://server.tld/feralctf/` emit `/feralctf/style.css` and `/feralctf/app.js`.
 - **Challenge card layout** — `challengeCard()` updated with `.card-top / .card-bottom` structure,
   difficulty dot, category color, solve count, and solved marker.
 - **Category filter pills** — `.cat-pill` buttons replace the old category `<select>` element.
@@ -1238,6 +1239,14 @@ no new sprint scope is required.
 - **Brand icon** — `images/feral10.jpg` (pixel-art squirrel) rendered in the topbar via `.brand-icon`.
 - **Layout** — topbar, nav, auth-form, user-info, admin sidebar, and card grid CSS updated to
   match the §12 specification mockups.
+- **Reverse-proxy base path support** — `src/routes.rs` derives a normalized path prefix from
+  `Config.server.base_url`, injects it into the frontend shell as a CSP-safe
+  `feralctf-base-path` meta tag, and also accepts prefixed API/static requests when a proxy
+  forwards the mount path unchanged. `frontend/app.js` uses this prefix for app-owned URLs
+  including API calls, WebSocket `/ws`, the brand image, and challenge file downloads; it can
+  also infer the prefix from the loaded `/feralctf/app.js` script URL. `index.html`, `app.js`,
+  and `style.css` are served with `Cache-Control: no-cache` to revalidate prefix-aware frontend
+  assets after deploys.
 
 ### Backend
 

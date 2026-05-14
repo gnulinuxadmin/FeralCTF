@@ -265,8 +265,9 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - `updateAdminNav()` in `frontend/app.js` adds/removes the Admin nav button based on `state.user.role === 'admin'`.
 - `error_page()` added to `src/routes.rs`; the `frontend()` fallback no longer serves `index.html` for all unknown paths.
   Instead, unknown paths return a styled HTML error page. The SPA shell handles its own routing on the client.
-- `frontend/index.html` asset paths changed to absolute (`/style.css`, `/app.js`) to prevent resolution failures when
-  the error page is served from non-root paths.
+- `frontend/index.html` is rendered through `src/routes.rs` so `server.base_url` can provide a public path prefix.
+  When `base_url = "https://server.tld/feralctf/"`, generated frontend URLs include `/feralctf/style.css`,
+  `/feralctf/app.js`, and a CSP-safe `<meta name="feralctf-base-path" content="/feralctf">`.
 - `list_admin_challenges` handler added to `src/handlers/admin.rs` using `Challenge::list_all()`. It is wired on
   `GET /api/admin/challenges` in `src/routes.rs` — protected by `require_admin` middleware.
 - `renderAdminChallenges()` in `frontend/app.js` now fetches from `GET /api/admin/challenges` (admin endpoint) instead
@@ -330,6 +331,14 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   scoreboard updates through `setScoreboard()`, which updates `state.scoreboard` and calls
   `updateAuth()`. Correct flag submissions and `score_update` WebSocket events now refresh the
   topbar score immediately without requiring a browser refresh. No backend/API change needed.
+- **Reverse-proxy base path support** — `src/routes.rs` derives a normalized public path prefix
+  from `Config.server.base_url` and injects it into `frontend/index.html`. `frontend/app.js`
+  reads the CSP-safe `feralctf-base-path` meta tag and uses `appPath()` for owned URLs: API calls,
+  WebSocket `/ws`, the brand image, and challenge file downloads. It also falls back to deriving
+  the prefix from the loaded `/feralctf/app.js` script URL if the meta tag is absent. The router
+  accepts prefixed API/static requests when a proxy forwards the mount path unchanged, e.g.
+  `/feralctf/api/...`. `index.html`, `app.js`, and `style.css` use `Cache-Control: no-cache` so
+  deploys revalidate the prefix-aware shell and frontend logic.
 
 ## Known Cautions
 

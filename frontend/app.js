@@ -14,6 +14,7 @@ const state = {
 };
 
 const app = document.getElementById('app');
+const basePath = detectBasePath();
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -30,7 +31,7 @@ function renderShell() {
   app.innerHTML = `
     <header class="topbar">
       <div class="brand">
-        <img src="/feral10.jpg" class="brand-icon" alt="">
+        <img src="${appPath('/feral10.jpg')}" class="brand-icon" alt="">
         <h1>Feral CTF</h1>
       </div>
       <nav class="nav">
@@ -314,7 +315,7 @@ async function openChallenge(id) {
 
 function fileLink(file) {
   return `
-    <a class="file-link" href="/${encodeURI(file.storage_path)}" download>
+    <a class="file-link" href="${appPath(`/${encodeURI(file.storage_path)}`)}" download>
       <span>${escapeHtml(file.filename)}</span>
       <small>${formatBytes(file.size_bytes)}</small>
     </a>
@@ -846,7 +847,7 @@ function tableView(title, headers, rows) {
 
 function connectWebSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
+  const socket = new WebSocket(`${protocol}//${window.location.host}${appPath('/ws')}`);
   state.ws = socket;
   socket.addEventListener('open', () => {
     state.reconnects = 0;
@@ -872,7 +873,7 @@ async function api(path, options = {}) {
     ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
     ...(options.headers || {}),
   };
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(appPath(path), { ...options, headers });
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
     try {
@@ -884,6 +885,34 @@ async function api(path, options = {}) {
   if (response.status === 204) return null;
   const text = await response.text();
   return text ? JSON.parse(text) : null;
+}
+
+function normalizeBasePath(path) {
+  const value = String(path || '').trim();
+  if (!value || value === '/') return '';
+  const prefixed = value.startsWith('/') ? value : `/${value}`;
+  return prefixed.replace(/\/+$/, '');
+}
+
+function detectBasePath() {
+  const metaPath = document.querySelector('meta[name="feralctf-base-path"]')?.content;
+  const normalizedMetaPath = normalizeBasePath(metaPath || '');
+  if (normalizedMetaPath) return normalizedMetaPath;
+
+  const scriptSrc = document.currentScript?.getAttribute('src') || '';
+  try {
+    const scriptUrl = new URL(scriptSrc, window.location.href);
+    return normalizeBasePath(scriptUrl.pathname.replace(/\/app\.js$/, ''));
+  } catch (_) {
+    return '';
+  }
+}
+
+function appPath(path) {
+  const value = String(path || '');
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+  const normalized = value.startsWith('/') ? value : `/${value}`;
+  return `${basePath}${normalized}`;
 }
 
 function emptyState(message) {
