@@ -326,6 +326,10 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   or `"Hash: <hash>"` for static ones. A `<small>` hint below the input tells the admin to hover.
   No backend change needed — `GET /api/admin/challenges` already returns the full `Challenge` struct
   including `flag_hash` and `flag_type`.
+- **Topbar score refresh after solves** — `loadScoreboard()` in `frontend/app.js` now routes
+  scoreboard updates through `setScoreboard()`, which updates `state.scoreboard` and calls
+  `updateAuth()`. Correct flag submissions and `score_update` WebSocket events now refresh the
+  topbar score immediately without requiring a browser refresh. No backend/API change needed.
 
 ## Known Cautions
 

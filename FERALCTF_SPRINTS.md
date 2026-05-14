@@ -1312,6 +1312,10 @@ no new sprint scope is required.
   static ones. A `<small>` note below the field tells the admin to hover. No API change needed;
   `GET /api/admin/challenges` already returns the full `Challenge` struct with `flag_hash` and
   `flag_type`.
+- **Topbar score refresh after correct solves** — `loadScoreboard()` now uses `setScoreboard()` to
+  refresh `state.scoreboard` and call `updateAuth()` together. Successful flag submissions and
+  `score_update` WebSocket events update the authenticated user's topbar score immediately without
+  a forced browser refresh. No backend or API change needed.
 
 ---
 

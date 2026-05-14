@@ -378,10 +378,15 @@ function closeModal() {
 
 async function loadScoreboard() {
   try {
-    state.scoreboard = await api('/api/scoreboard');
+    setScoreboard(await api('/api/scoreboard'));
   } catch (_) {
-    state.scoreboard = { teams: [] };
+    setScoreboard({ teams: [] });
   }
+}
+
+function setScoreboard(scoreboard) {
+  state.scoreboard = scoreboard || { teams: [] };
+  updateAuth();
 }
 
 function renderScoreboard() {
@@ -849,7 +854,7 @@ function connectWebSocket() {
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'score_update') {
-      state.scoreboard = { teams: message.scoreboard || [] };
+      setScoreboard({ teams: message.scoreboard || [] });
       if (state.view === 'scoreboard') renderScoreboard();
     }
   });

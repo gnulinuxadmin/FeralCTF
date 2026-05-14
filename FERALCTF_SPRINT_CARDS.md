@@ -305,6 +305,9 @@ responses. Release binary is self-contained.
   team test updated to check `invite_code.len() == 36`
 - Admin flag mouseover in edit modal — flag `<input>` carries `title` showing stored value
   (`"Pattern: …"` for regex, `"Hash: …"` for static); `<small>` hint visible below field
+- Topbar score refresh after correct solves — scoreboard updates now flow through
+  `setScoreboard()` so `updateAuth()` refreshes the displayed score after flag submissions and
+  `score_update` WebSocket events
 
 **Done when:** `cargo test` passes (50/50). All features exercised in browser.
 
