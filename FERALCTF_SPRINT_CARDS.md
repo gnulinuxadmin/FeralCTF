@@ -316,6 +316,8 @@ responses. Release binary is self-contained.
   denominator if a partial scoreboard update omits it
 - Scoreboard progress widths are applied after render instead of via inline `style`, so CSP does
   not make every progress bar appear full-width
+- Topbar logo image shows `Version 1.0` on mouseover
+- Topbar logo image renders at 60x60 px
 
 **Done when:** `cargo test` passes (65/65). All features exercised in browser.
 

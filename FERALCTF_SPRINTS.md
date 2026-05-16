@@ -1362,6 +1362,9 @@ no new sprint scope is required.
 - **CSP-safe progress width** — `renderScoreboard()` renders progress widths as data attributes
   and applies them after render with DOM style assignment. This avoids inline `style` attributes
   being blocked by the app's CSP and making every progress bar look full-width.
+- **Logo version hover** — The topbar logo image now exposes `Version 1.0` through its native
+  mouseover tooltip.
+- **Larger logo icon** — `.brand-icon` now renders the topbar logo at 60x60 px.
 
 ---
 

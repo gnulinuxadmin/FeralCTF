@@ -368,6 +368,8 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - **CSP-safe progress width** — Scoreboard progress bars no longer render width through an inline
   `style` attribute. `renderScoreboard()` writes `data-progress-width` and applies the width via
   DOM style assignment after render, so CSP does not force every bar to appear full-width.
+- **Logo version hover** — The topbar logo image now has a `title="Version 1.0"` tooltip.
+- **Larger logo icon** — `.brand-icon` now renders the topbar logo at 60x60 px.
 
 ## Known Cautions
 

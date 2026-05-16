@@ -31,7 +31,7 @@ function renderShell() {
   app.innerHTML = `
     <header class="topbar">
       <div class="brand">
-        <img src="${appPath('/feral10.jpg')}" class="brand-icon" alt="">
+        <img src="${appPath('/feral10.jpg')}" class="brand-icon" alt="" title="Version 1.0">
         <h1>Feral CTF</h1>
       </div>
       <nav class="nav">
