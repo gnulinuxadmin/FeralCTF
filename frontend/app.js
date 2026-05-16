@@ -152,6 +152,7 @@ function showRegisterModal() {
       <form id="register-form" class="admin-form">
         <input name="username" autocomplete="username" placeholder="username" required>
         <input name="password" type="password" autocomplete="new-password" placeholder="password (min 8 chars)" required>
+        <input name="password_confirm" type="password" autocomplete="new-password" placeholder="confirm password" required>
         <input name="team_name" placeholder="new team name (optional)">
         <input name="invite_code" placeholder="team invite code (optional)">
         <button type="submit">Register</button>
@@ -170,6 +171,10 @@ function showRegisterModal() {
 async function registerUser(event) {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.target).entries());
+  if (data.password !== data.password_confirm) {
+    toast('passwords do not match', 'error');
+    return;
+  }
   const body = { username: data.username, password: data.password };
   if (data.team_name.trim()) body.team_name = data.team_name.trim();
   if (data.invite_code.trim()) body.invite_code = data.invite_code.trim();
@@ -218,6 +223,10 @@ async function loadChallenges() {
 
 function renderChallenges() {
   const view = document.getElementById('view');
+  if (!state.user) {
+    view.innerHTML = emptyState('Log in to view challenges.');
+    return;
+  }
   const categories = ['all', ...new Set(state.challenges.map((c) => c.category).filter(Boolean))];
   const challenges = filteredChallenges();
 
@@ -392,7 +401,7 @@ function setScoreboard(scoreboard) {
 
 function renderScoreboard() {
   const view = document.getElementById('view');
-  const maxScore = Math.max(1, ...state.scoreboard.teams.map((team) => team.score));
+  const totalVisiblePoints = state.scoreboard.total_visible_points || 0;
   view.innerHTML = `
     <section class="panel">
       <div class="scoreboard-header">
@@ -401,15 +410,17 @@ function renderScoreboard() {
       </div>
       <table class="scoreboard">
         <thead><tr><th>#</th><th>Team</th><th>Solves</th><th>Progress</th><th>Score</th></tr></thead>
-        <tbody>${state.scoreboard.teams.map((team) => scoreRow(team, maxScore)).join('') || '<tr><td colspan="5">No teams yet.</td></tr>'}</tbody>
+        <tbody>${state.scoreboard.teams.map((team) => scoreRow(team, totalVisiblePoints)).join('') || '<tr><td colspan="5">No teams yet.</td></tr>'}</tbody>
       </table>
     </section>
   `;
 }
 
-function scoreRow(team, maxScore) {
+function scoreRow(team, totalVisiblePoints) {
   const isCurrent = state.user && state.user.team_id === team.team_id;
-  const progress = Math.round((team.score / maxScore) * 100);
+  const progress = totalVisiblePoints > 0 ? Math.round((team.score / totalVisiblePoints) * 100) : 0;
+  const barWidth = Math.min(100, Math.max(0, progress));
+  const progressTitle = `${progress}%: ${team.score} of ${totalVisiblePoints} points scored`;
   const medals = ['🥇', '🥈', '🥉'];
   const rank = team.rank <= 3 ? medals[team.rank - 1] : team.rank;
   return `
@@ -417,7 +428,7 @@ function scoreRow(team, maxScore) {
       <td>${rank}</td>
       <td>${escapeHtml(team.team_name)}${isCurrent ? ' <span class="muted">(you)</span>' : ''}</td>
       <td>${team.solve_count}</td>
-      <td><div class="progress"><span style="width:${progress}%"></span></div></td>
+      <td><div class="progress" title="${escapeHtml(progressTitle)}"><span style="width:${barWidth}%"></span></div></td>
       <td>${team.score}</td>
     </tr>
   `;

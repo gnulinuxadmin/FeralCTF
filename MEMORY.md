@@ -349,6 +349,19 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   existing `teams.is_disqualified`, recalculates scores, invalidates the scoreboard cache, and audits
   `team.disqualify` / `team.reinstate`.
 
+### Post-Sprint 13 continued (session 3)
+
+- **Logged-out challenge copy** — `renderChallenges()` in `frontend/app.js` now shows
+  `Log in to view challenges.` when no user session is present. The `No visible challenges.`
+  empty state remains for logged-in users with no visible unsolved challenges.
+- **Registration password confirmation** — The browser registration modal now includes a second
+  password field and `registerUser()` rejects mismatched passwords before calling
+  `POST /api/auth/register`. The backend request shape is unchanged.
+- **Scoreboard progress denominator** — `ScoreboardState` now serializes `total_visible_points`,
+  computed from visible challenges (`is_hidden = 0`). Scoreboard progress bars use team score
+  divided by that total instead of the leading team's score, and the hover text shows
+  percentage plus `X of Y points scored`.
+
 ## Known Cautions
 
 - Do not revive old single-connection database abstractions.

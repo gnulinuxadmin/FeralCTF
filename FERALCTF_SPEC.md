@@ -370,6 +370,28 @@ Submission rate limits are enforced per team and per challenge (see §6.5).
 | GET | `/api/admin/teams` | Admin | All teams with full stats |
 | POST | `/api/admin/teams/:id/disqualify` | Admin | Zero score, hide from scoreboard |
 
+**Scoreboard response:**
+
+```json
+{
+  "teams": [
+    {
+      "rank": 1,
+      "team_id": 7,
+      "team_name": "Example Team",
+      "score": 100,
+      "solve_count": 1,
+      "last_solve_at": 1710000000
+    }
+  ],
+  "total_visible_points": 1000,
+  "generated_at": 1710000010
+}
+```
+
+`total_visible_points` is the sum of current `points` for all visible challenges (`is_hidden = 0`)
+and is used by the frontend scoreboard progress bars.
+
 ### 4.4 Import / Export
 
 | Method | Path | Auth | Description |

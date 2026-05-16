@@ -274,6 +274,7 @@ responses. Release binary is self-contained.
 **Tasks completed:**
 
 - Web registration form — `showRegisterModal()` and `registerUser()` in `frontend/app.js`
+- Registration password confirmation — browser registration rejects mismatched passwords before API submit
 - Admin nav hidden from non-admin accounts — `updateAdminNav()` in `frontend/app.js`
 - Themed error page for unknown routes — `error_page()` in `src/routes.rs`; SPA fallback removed
 - Absolute asset paths in `frontend/index.html` (prevents resolution failures from non-root paths)
@@ -308,8 +309,11 @@ responses. Release binary is self-contained.
 - Topbar score refresh after correct solves — scoreboard updates now flow through
   `setScoreboard()` so `updateAuth()` refreshes the displayed score after flag submissions and
   `score_update` WebSocket events
+- Logged-out challenge copy — `renderChallenges()` tells unauthenticated users to log in before viewing challenges
+- Scoreboard progress denominator — `ScoreboardState.total_visible_points` sums visible challenge points;
+  progress bars use that total and show percentage plus `X of Y points scored` on hover
 
-**Done when:** `cargo test` passes (50/50). All features exercised in browser.
+**Done when:** `cargo test` passes (65/65). All features exercised in browser.
 
 ---
 

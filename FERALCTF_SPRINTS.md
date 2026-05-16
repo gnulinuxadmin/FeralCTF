@@ -554,6 +554,7 @@ pub struct TeamScore {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ScoreboardState {
     pub teams: Vec<TeamScore>,
+    pub total_visible_points: i64, // SUM(points) for challenges where is_hidden = 0
     pub generated_at: i64,
 }
 
@@ -1332,6 +1333,26 @@ no new sprint scope is required.
   refresh `state.scoreboard` and call `updateAuth()` together. Successful flag submissions and
   `score_update` WebSocket events update the authenticated user's topbar score immediately without
   a forced browser refresh. No backend or API change needed.
+
+### Session 3 improvements
+
+#### Backend (session 3)
+
+- **Scoreboard total visible points** — `ScoreboardState` now serializes `total_visible_points`,
+  computed as the sum of current `points` for visible challenges (`is_hidden = 0`). This gives the
+  frontend a stable denominator for scoreboard progress bars.
+
+#### Frontend (session 3)
+
+- **Logged-out challenge copy** — `renderChallenges()` shows `Log in to view challenges.` when no
+  user session is present. Logged-in users with no visible unsolved challenges still see
+  `No visible challenges.`
+- **Registration password confirmation** — The browser registration modal includes a second
+  password field, and `registerUser()` rejects mismatched passwords before calling
+  `POST /api/auth/register`. The backend request shape is unchanged.
+- **Scoreboard progress hover** — Scoreboard progress bars now use
+  `team.score / total_visible_points`, clamp the visual bar to 0–100%, and expose hover text in
+  the form `10%: 100 of 1000 points scored`.
 
 ---
 

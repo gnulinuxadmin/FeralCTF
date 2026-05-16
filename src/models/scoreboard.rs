@@ -14,12 +14,18 @@ pub struct TeamScore {
 #[derive(Debug, Clone, Serialize)]
 pub struct ScoreboardState {
     pub teams: Vec<TeamScore>,
+    pub total_visible_points: i64,
     pub generated_at: i64,
 }
 
 impl ScoreboardState {
     pub fn build(conn: &DbConn) -> Result<Self, AppError> {
         let generated_at = chrono::Utc::now().timestamp();
+        let total_visible_points = conn.query_row(
+            "SELECT COALESCE(SUM(points), 0) FROM challenges WHERE is_hidden = 0",
+            [],
+            |row| row.get(0),
+        )?;
         let mut stmt = conn.prepare(
             "SELECT t.id, t.name, t.score, COUNT(s.id) AS solve_count, t.last_solve_at
              FROM teams t
@@ -61,6 +67,7 @@ impl ScoreboardState {
 
         Ok(ScoreboardState {
             teams,
+            total_visible_points,
             generated_at,
         })
     }
@@ -98,10 +105,10 @@ mod tests {
         conn.execute(
             "INSERT INTO challenges (
                 id, slug, title, description, category, flag_hash, flag_salt, flag_type,
-                flag_case_sensitive, points, max_points, min_points, decay_rate, created_at
+                flag_case_sensitive, points, max_points, min_points, decay_rate, is_hidden, created_at
              )
              VALUES (1, 'challenge', 'Challenge', 'desc', 'web', 'hash', 'salt', 'static',
-                0, 100, 500, 50, 12, 1000)",
+                0, 100, 500, 50, 12, 0, 1000)",
             [],
         )
         .unwrap();
@@ -121,6 +128,7 @@ mod tests {
         let scoreboard = ScoreboardState::build(&conn).unwrap();
 
         assert_eq!(scoreboard.teams.len(), 4);
+        assert_eq!(scoreboard.total_visible_points, 100);
         assert_eq!(scoreboard.teams[0].team_name, "Delta");
         assert_eq!(scoreboard.teams[0].rank, 1);
         assert_eq!(scoreboard.teams[1].team_name, "Bravo");
@@ -130,5 +138,50 @@ mod tests {
         assert_eq!(scoreboard.teams[3].team_name, "Alpha");
         assert_eq!(scoreboard.teams[3].rank, 4);
         assert_eq!(scoreboard.teams[1].solve_count, 1);
+    }
+
+    #[test]
+    fn scoreboard_total_visible_points_excludes_hidden_challenges() {
+        let pool = test_pool();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO challenges (
+                slug, title, description, category, flag_hash, flag_salt, flag_type,
+                flag_case_sensitive, points, max_points, min_points, decay_rate, is_hidden, created_at
+             )
+             VALUES
+                ('visible-one', 'Visible One', 'desc', 'web', 'hash', 'salt', 'static',
+                    0, 100, 500, 50, 12, 0, 1000),
+                ('visible-two', 'Visible Two', 'desc', 'pwn', 'hash', 'salt', 'static',
+                    0, 250, 500, 50, 12, 0, 1000),
+                ('hidden-one', 'Hidden One', 'desc', 'rev', 'hash', 'salt', 'static',
+                    0, 900, 500, 50, 12, 1, 1000)",
+            [],
+        )
+        .unwrap();
+
+        let scoreboard = ScoreboardState::build(&conn).unwrap();
+
+        assert_eq!(scoreboard.total_visible_points, 350);
+    }
+
+    #[test]
+    fn scoreboard_total_visible_points_is_zero_without_visible_challenges() {
+        let pool = test_pool();
+        let conn = pool.get().unwrap();
+        conn.execute(
+            "INSERT INTO challenges (
+                slug, title, description, category, flag_hash, flag_salt, flag_type,
+                flag_case_sensitive, points, max_points, min_points, decay_rate, is_hidden, created_at
+             )
+             VALUES ('hidden-only', 'Hidden Only', 'desc', 'web', 'hash', 'salt', 'static',
+                0, 500, 500, 50, 12, 1, 1000)",
+            [],
+        )
+        .unwrap();
+
+        let scoreboard = ScoreboardState::build(&conn).unwrap();
+
+        assert_eq!(scoreboard.total_visible_points, 0);
     }
 }
