@@ -314,6 +314,8 @@ responses. Release binary is self-contained.
   progress bars use that total and show percentage plus `X of Y points scored` on hover
 - WebSocket score updates include `total_visible_points`, and the frontend preserves the previous
   denominator if a partial scoreboard update omits it
+- Scoreboard progress widths are applied after render instead of via inline `style`, so CSP does
+  not make every progress bar appear full-width
 
 **Done when:** `cargo test` passes (65/65). All features exercised in browser.
 

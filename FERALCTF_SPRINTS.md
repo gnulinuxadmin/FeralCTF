@@ -1359,6 +1359,9 @@ no new sprint scope is required.
 - **Partial scoreboard update hardening** — `setScoreboard()` preserves the previous
   `total_visible_points` if a partial update omits it, preventing live updates from resetting the
   denominator to zero.
+- **CSP-safe progress width** — `renderScoreboard()` renders progress widths as data attributes
+  and applies them after render with DOM style assignment. This avoids inline `style` attributes
+  being blocked by the app's CSP and making every progress bar look full-width.
 
 ---
 

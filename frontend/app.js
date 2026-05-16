@@ -421,6 +421,7 @@ function renderScoreboard() {
       </table>
     </section>
   `;
+  applyProgressWidths(view);
 }
 
 function scoreRow(team, totalVisiblePoints) {
@@ -435,10 +436,16 @@ function scoreRow(team, totalVisiblePoints) {
       <td>${rank}</td>
       <td>${escapeHtml(team.team_name)}${isCurrent ? ' <span class="muted">(you)</span>' : ''}</td>
       <td>${team.solve_count}</td>
-      <td><div class="progress" title="${escapeHtml(progressTitle)}"><span style="width:${barWidth}%"></span></div></td>
+      <td><div class="progress" title="${escapeHtml(progressTitle)}"><span data-progress-width="${barWidth}"></span></div></td>
       <td>${team.score}</td>
     </tr>
   `;
+}
+
+function applyProgressWidths(root) {
+  root.querySelectorAll('[data-progress-width]').forEach((bar) => {
+    bar.style.width = `${bar.dataset.progressWidth}%`;
+  });
 }
 
 async function renderProfile() {

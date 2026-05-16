@@ -365,6 +365,9 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   `total_visible_points`, and `setScoreboard()` preserves the previous denominator if a partial
   update omits it. This prevents WebSocket updates from resetting progress hover text to
   `X of 0 points scored`.
+- **CSP-safe progress width** — Scoreboard progress bars no longer render width through an inline
+  `style` attribute. `renderScoreboard()` writes `data-progress-width` and applies the width via
+  DOM style assignment after render, so CSP does not force every bar to appear full-width.
 
 ## Known Cautions
 
