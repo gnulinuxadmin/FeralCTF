@@ -15,7 +15,7 @@ For deep technical details, see [FERALCTF_SPEC.md](FERALCTF_SPEC.md).
 
 ## Status
 
-Current release: **1.0rc5** — all core sprints complete. Feature-complete for small-to-medium competitions;
+Current release: **v1.0.0** — all core sprints complete. Feature-complete for small-to-medium competitions;
 see [§11 Out of Scope](FERALCTF_SPEC.md) for deferred items.
 
 ## Features
