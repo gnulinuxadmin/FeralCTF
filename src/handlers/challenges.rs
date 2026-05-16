@@ -191,6 +191,7 @@ pub async fn submit_flag(
             .ws_hub
             .broadcast(crate::handlers::ws::WsEvent::ScoreUpdate {
                 scoreboard: sb.teams,
+                total_visible_points: sb.total_visible_points,
             });
     }
 

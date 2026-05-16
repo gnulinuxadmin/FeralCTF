@@ -312,6 +312,8 @@ responses. Release binary is self-contained.
 - Logged-out challenge copy — `renderChallenges()` tells unauthenticated users to log in before viewing challenges
 - Scoreboard progress denominator — `ScoreboardState.total_visible_points` sums visible challenge points;
   progress bars use that total and show percentage plus `X of Y points scored` on hover
+- WebSocket score updates include `total_visible_points`, and the frontend preserves the previous
+  denominator if a partial scoreboard update omits it
 
 **Done when:** `cargo test` passes (65/65). All features exercised in browser.
 

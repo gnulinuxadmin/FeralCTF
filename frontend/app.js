@@ -395,7 +395,14 @@ async function loadScoreboard() {
 }
 
 function setScoreboard(scoreboard) {
-  state.scoreboard = scoreboard || { teams: [] };
+  const previous = state.scoreboard || { teams: [], total_visible_points: 0 };
+  const next = scoreboard || { teams: [] };
+  state.scoreboard = {
+    ...previous,
+    ...next,
+    teams: next.teams || [],
+    total_visible_points: next.total_visible_points ?? previous.total_visible_points ?? 0,
+  };
   updateAuth();
 }
 
@@ -950,7 +957,10 @@ function connectWebSocket() {
   socket.addEventListener('message', (event) => {
     const message = JSON.parse(event.data);
     if (message.type === 'score_update') {
-      setScoreboard({ teams: message.scoreboard || [] });
+      setScoreboard({
+        teams: message.scoreboard || [],
+        total_visible_points: message.total_visible_points ?? state.scoreboard.total_visible_points ?? 0,
+      });
       if (state.view === 'scoreboard') renderScoreboard();
     }
   });

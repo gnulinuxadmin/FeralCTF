@@ -29,6 +29,7 @@ pub enum WsEvent {
     },
     ScoreUpdate {
         scoreboard: Vec<TeamScore>,
+        total_visible_points: i64,
     },
 }
 
@@ -129,6 +130,17 @@ mod tests {
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains(r#""type":"new_solve""#));
         assert!(json.contains(r#""first_blood":true"#));
+    }
+
+    #[test]
+    fn score_update_serializes_total_visible_points() {
+        let ev = WsEvent::ScoreUpdate {
+            scoreboard: Vec::new(),
+            total_visible_points: 1000,
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(json.contains(r#""type":"score_update""#));
+        assert!(json.contains(r#""total_visible_points":1000"#));
     }
 
     #[tokio::test]

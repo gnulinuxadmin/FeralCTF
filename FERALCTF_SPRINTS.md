@@ -772,6 +772,7 @@ pub enum WsEvent {
     },
     ScoreUpdate {
         scoreboard: Vec<TeamScore>,
+        total_visible_points: i64,
     },
 }
 
@@ -1341,6 +1342,8 @@ no new sprint scope is required.
 - **Scoreboard total visible points** — `ScoreboardState` now serializes `total_visible_points`,
   computed as the sum of current `points` for visible challenges (`is_hidden = 0`). This gives the
   frontend a stable denominator for scoreboard progress bars.
+- **Score update denominator** — `WsEvent::ScoreUpdate` now includes `total_visible_points` so live
+  WebSocket updates preserve the same progress denominator as `GET /api/scoreboard`.
 
 #### Frontend (session 3)
 
@@ -1353,6 +1356,9 @@ no new sprint scope is required.
 - **Scoreboard progress hover** — Scoreboard progress bars now use
   `team.score / total_visible_points`, clamp the visual bar to 0–100%, and expose hover text in
   the form `10%: 100 of 1000 points scored`.
+- **Partial scoreboard update hardening** — `setScoreboard()` preserves the previous
+  `total_visible_points` if a partial update omits it, preventing live updates from resetting the
+  denominator to zero.
 
 ---
 

@@ -361,6 +361,10 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   computed from visible challenges (`is_hidden = 0`). Scoreboard progress bars use team score
   divided by that total instead of the leading team's score, and the hover text shows
   percentage plus `X of Y points scored`.
+- **Live score update denominator** — `WsEvent::ScoreUpdate` now includes
+  `total_visible_points`, and `setScoreboard()` preserves the previous denominator if a partial
+  update omits it. This prevents WebSocket updates from resetting progress hover text to
+  `X of 0 points scored`.
 
 ## Known Cautions
 

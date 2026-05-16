@@ -132,7 +132,7 @@ enum WsEvent {
     NewSolve    { team: String, challenge: String, points: u32, first_blood: bool },
     Announcement { title: String, body: String },
     StateChange  { started: bool, ended: bool, frozen: bool },
-    ScoreUpdate  { scoreboard: Vec<TeamScore> },
+    ScoreUpdate  { scoreboard: Vec<TeamScore>, total_visible_points: i64 },
 }
 ```
 
@@ -390,7 +390,8 @@ Submission rate limits are enforced per team and per challenge (see §6.5).
 ```
 
 `total_visible_points` is the sum of current `points` for all visible challenges (`is_hidden = 0`)
-and is used by the frontend scoreboard progress bars.
+and is used by the frontend scoreboard progress bars. WebSocket `score_update` events include the
+same denominator so live updates preserve progress percentages.
 
 ### 4.4 Import / Export
 
