@@ -11,7 +11,7 @@ database server, or a separate frontend build pipeline.
 
 For deep technical details, see [FERALCTF_SPEC.md](FERALCTF_SPEC.md).
 
-![FeralCTF screen shot of challenges](screenshots/Screenshot_20260513_014426.png)
+![FeralCTF screen shot of challenges](screenshots/Screenshot_20260520_0143309.png)
 
 ## Status
 
