@@ -123,6 +123,17 @@ pub fn revoke_session(pool: &DbPool, token_hash: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+pub fn revoke_user_sessions(pool: &DbPool, user_id: i64) -> Result<(), AppError> {
+    let conn = pool
+        .get()
+        .map_err(|err| anyhow::anyhow!("database pool error: {err}"))?;
+    conn.execute(
+        "UPDATE sessions SET revoked = 1 WHERE user_id = ?1",
+        rusqlite::params![user_id],
+    )?;
+    Ok(())
+}
+
 pub fn is_session_valid(pool: &DbPool, token_hash: &str) -> Result<bool, AppError> {
     let conn = pool
         .get()

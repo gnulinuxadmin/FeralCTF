@@ -318,8 +318,15 @@ responses. Release binary is self-contained.
   not make every progress bar appear full-width
 - Topbar logo image shows `Version 1.0` on mouseover
 - Topbar logo image renders at 60x60 px
+- Profile password change UI — current password, new password, and confirmation fields call
+  `PUT /api/auth/password`; successful changes revoke all user sessions and return the browser to login
+- Admin password assignment — Admin → Users Password action calls `PUT /api/admin/users/{id}/password`,
+  validates confirmation, hashes the assigned password, revokes target sessions, and audits `user.password_update`
+- Optional built-in HTTPS mode — nginx/Caddy remains recommended for production TLS and hosting
+  concerns; `[server]` also supports `tls_enabled`, `tls_cert_path`, `tls_key_path`, and optional
+  `tls_chain_path`, with `FERALCTF_SERVER_TLS_*` environment overrides
 
-**Done when:** `cargo test` passes (65/65). All features exercised in browser.
+**Done when:** `cargo test` passes (72/72). All features exercised in browser.
 
 ---
 

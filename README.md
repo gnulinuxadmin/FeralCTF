@@ -35,12 +35,15 @@ see [§11 Out of Scope](FERALCTF_SPEC.md) for deferred items.
 - Admin audit log for sensitive management actions
 - Themed error pages for unknown routes
 - HTTP security headers and configurable CORS
+- Recommended reverse-proxy TLS deployment, with optional built-in HTTPS mode
 - Single-binary startup with embedded frontend and embedded schema migrations
 
 ## Quick Start
 
-Actual production deployments should see the deployment section of the specification for serving behind
-a reverse proxy that handles SSL/TLS and certificate management. [Deployment Notes](https://github.com/gnulinuxadmin/FeralCTF/blob/main/FERALCTF_SPEC.md#8-deployment) 
+Actual production deployments should see the deployment section of the specification for HTTPS setup.
+nginx or Caddy in front of FeralCTF is recommended for production TLS, certificate renewal,
+redirects, caching, request limits, and hosting related files. Built-in TLS is available as a
+simpler deployment option. [Deployment Notes](https://github.com/gnulinuxadmin/FeralCTF/blob/main/FERALCTF_SPEC.md#8-deployment)
 
 This quick started is intended to allow you to try FeralCTF out locally or stage the challenges locally
 to move to a server hosting FeralCTF when you publish the game.
@@ -106,7 +109,7 @@ Operational notes:
 
 - Run one FeralCTF process per competition.
 - Keep `config.toml`, `ctf.db`, backups, and exports private.
-- Put production instances behind HTTPS.
+- Put production instances behind HTTPS; nginx or Caddy is recommended, with built-in TLS available as an option.
 - Store attachments outside any public webroot.
 - Back up the SQLite database before and after major event milestones.
 - Existing static flags are stored as salted hashes and cannot be recovered as plaintext.
@@ -124,6 +127,10 @@ host = "0.0.0.0"
 port = 8080
 base_url = "https://ctf.example.org"
 allowed_origins = []
+tls_enabled = false
+tls_cert_path = ""
+tls_key_path = ""
+tls_chain_path = ""
 
 [database]
 path = "./ctf.db"
@@ -140,6 +147,10 @@ Useful environment overrides:
 ```bash
 FERALCTF_SERVER_PORT=9090
 FERALCTF_SERVER_ALLOWED_ORIGINS=https://ctf.example.org
+FERALCTF_SERVER_TLS_ENABLED=true
+FERALCTF_SERVER_TLS_CERT_PATH=/etc/letsencrypt/live/ctf/fullchain.pem
+FERALCTF_SERVER_TLS_KEY_PATH=/etc/letsencrypt/live/ctf/privkey.pem
+FERALCTF_SERVER_TLS_CHAIN_PATH=/etc/letsencrypt/live/ctf/chain.pem
 FERALCTF_DATABASE_PATH=/data/ctf.db
 FERALCTF_AUTH_JWT_SECRET=change-me
 FERALCTF_STORAGE_ATTACHMENTS_PATH=/data/attachments

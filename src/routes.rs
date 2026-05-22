@@ -3,7 +3,7 @@ use crate::handlers::admin::{
     announce, backup, ban_user, competition_end, competition_freeze, competition_start,
     create_challenge, dashboard, delete_challenge, disqualify_team, export_bundle, get_teams,
     get_users, import_bundle, list_admin_challenges, list_submissions, require_admin,
-    update_challenge, update_team_disqualified, update_user_role,
+    update_challenge, update_team_disqualified, update_user_password, update_user_role,
 };
 use crate::handlers::auth::{change_password, login, logout, me, register};
 use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
@@ -46,6 +46,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/admin/users", get(get_users))
         .route("/api/admin/users/{id}/ban", post(ban_user))
         .route("/api/admin/users/{id}/role", put(update_user_role))
+        .route("/api/admin/users/{id}/password", put(update_user_password))
         .route("/api/admin/teams", get(get_teams))
         .route("/api/admin/teams/{id}/disqualify", post(disqualify_team))
         .route(

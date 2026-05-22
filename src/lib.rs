@@ -15,6 +15,7 @@ pub mod models;
 pub mod routes;
 pub mod scoring;
 pub mod storage;
+pub mod tls;
 
 use std::sync::Arc;
 

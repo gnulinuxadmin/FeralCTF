@@ -233,6 +233,8 @@ pub async fn change_password(
         "UPDATE users SET password_hash = ?1 WHERE id = ?2",
         rusqlite::params![new_hash, user.id],
     )?;
+    drop(conn);
+    auth::revoke_user_sessions(&state.db, user.id)?;
 
     Ok(Json(()))
 }
@@ -269,6 +271,34 @@ mod tests {
             team_name: None,
             invite_code: None,
         }
+    }
+
+    fn bearer_headers(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        headers
+    }
+
+    fn create_user_session(state: &AppState, username: &str, password: &str) -> (User, String) {
+        let conn = state.db.get().unwrap();
+        let req = RegisterRequest {
+            username: username.to_string(),
+            email: None,
+            password: password.to_string(),
+            team_name: None,
+            invite_code: None,
+        };
+        let hash = auth::hash_password(password).unwrap();
+        let user = User::create(&conn, &req, &hash).unwrap();
+        drop(conn);
+        let ttl = session_ttl(&state.config, &user.role);
+        let claims = make_claims(&user, ttl);
+        let token = auth::sign_jwt(&claims, &state.config.auth.jwt_secret).unwrap();
+        auth::create_session(&state.db, user.id, &token, ttl).unwrap();
+        (user, token)
     }
 
     #[test]
@@ -355,5 +385,67 @@ mod tests {
         assert!(validate_username(&"a".repeat(33)).is_err()); // too long
         assert!(validate_username("bad name").is_err()); // space
         assert!(validate_username("good_user-1").is_ok());
+    }
+
+    #[tokio::test]
+    async fn change_password_updates_hash_and_revokes_sessions() {
+        let state = test_state();
+        let (user, token) = create_user_session(&state, "alice", "password123");
+
+        let _ = change_password(
+            State(state.clone()),
+            bearer_headers(&token),
+            Json(ChangePasswordRequest {
+                current_password: "password123".to_string(),
+                new_password: "new-password123".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(!auth::is_session_valid(&state.db, &auth::hash_token(&token)).unwrap());
+        let conn = state.db.get().unwrap();
+        let updated = User::find_by_id(&conn, user.id).unwrap().unwrap();
+        assert!(auth::verify_password("new-password123", &updated.password_hash).unwrap());
+        assert!(!auth::verify_password("password123", &updated.password_hash).unwrap());
+    }
+
+    #[tokio::test]
+    async fn change_password_rejects_wrong_current_password() {
+        let state = test_state();
+        let (_user, token) = create_user_session(&state, "alice", "password123");
+
+        let err = change_password(
+            State(state.clone()),
+            bearer_headers(&token),
+            Json(ChangePasswordRequest {
+                current_password: "wrong-password".to_string(),
+                new_password: "new-password123".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::Unauthorized));
+        assert!(auth::is_session_valid(&state.db, &auth::hash_token(&token)).unwrap());
+    }
+
+    #[tokio::test]
+    async fn change_password_rejects_short_new_password() {
+        let state = test_state();
+        let (_user, token) = create_user_session(&state, "alice", "password123");
+
+        let err = change_password(
+            State(state),
+            bearer_headers(&token),
+            Json(ChangePasswordRequest {
+                current_password: "password123".to_string(),
+                new_password: "short".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::BadRequest(_)));
     }
 }

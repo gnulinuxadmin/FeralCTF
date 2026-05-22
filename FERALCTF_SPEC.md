@@ -114,7 +114,7 @@ cache misses.
 
 | Layer | Component | Target |
 |---|---|---|
-| TLS | Reverse proxy (nginx/Caddy) — not built-in | < 1 ms |
+| TLS | Reverse proxy recommended (nginx/Caddy); built-in Rustls optional | < 1 ms |
 | Rate limiting | In-process team/challenge submission limiter | < 0.1 ms |
 | Auth | JWT validation, cache lookup | < 0.5 ms |
 | Handler | Business logic | < 1 ms (cached) |
@@ -298,7 +298,7 @@ Submission rate limits are enforced per team and per challenge (see §6.5).
 | POST | `/api/auth/login` | None | Returns signed JWT |
 | POST | `/api/auth/logout` | Required | Revokes token in `sessions` table |
 | GET | `/api/auth/me` | Required | Current user + team info |
-| PUT | `/api/auth/password` | Required | Change password |
+| PUT | `/api/auth/password` | Required | Change password and revoke all sessions for the user |
 
 **Login response:**
 
@@ -407,6 +407,7 @@ same denominator so live updates preserve progress percentages.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/api/admin/submissions` | Admin | Full submission log (paginated, filterable) |
+| PUT | `/api/admin/users/:id/password` | Admin | Assign a new password and revoke all target-user sessions |
 | POST | `/api/admin/announce` | Admin | Broadcast announcement |
 | GET | `/api/admin/backup` | Admin | Download raw SQLite database file |
 | POST | `/api/admin/competition/start` | Admin | Start competition |
@@ -627,6 +628,10 @@ port = 8080
 host = "0.0.0.0"
 base_url = "https://ctf.yourdomain.com"
 allowed_origins = []                         # optional CORS allowlist
+tls_enabled = false                          # optional direct HTTPS; reverse proxy recommended for production
+tls_cert_path = ""                           # PEM leaf certificate
+tls_key_path = ""                            # PEM private key
+tls_chain_path = ""                          # optional PEM intermediate chain
 
 [competition]
 name = "FeralCTF 2026"
@@ -670,6 +675,10 @@ All config values can be overridden with environment variables using the prefix 
 ```bash
 FERALCTF_SERVER_PORT=9090
 FERALCTF_SERVER_ALLOWED_ORIGINS=https://ctf.yourdomain.com
+FERALCTF_SERVER_TLS_ENABLED=true
+FERALCTF_SERVER_TLS_CERT_PATH=/etc/letsencrypt/live/ctf/fullchain.pem
+FERALCTF_SERVER_TLS_KEY_PATH=/etc/letsencrypt/live/ctf/privkey.pem
+FERALCTF_SERVER_TLS_CHAIN_PATH=/etc/letsencrypt/live/ctf/chain.pem
 FERALCTF_DATABASE_PATH=/data/ctf.db
 FERALCTF_AUTH_JWT_SECRET=supersecret
 ```
@@ -694,9 +703,21 @@ curl -L https://github.com/yourorg/feralctf/releases/latest/download/feralctf-li
 # First user to register becomes admin
 ```
 
-### 8.2 Reverse Proxy (nginx)
+### 8.2 HTTPS
 
-TLS is handled by the reverse proxy. FeralCTF handles WebSocket upgrade internally.
+For production deployments, prefer terminating TLS with a reverse proxy such as nginx or Caddy.
+That keeps certificate renewal, redirects, compression, caching, request limits, and any
+site-adjacent static files in infrastructure designed for web hosting. FeralCTF handles WebSocket
+upgrade internally behind the proxy.
+
+FeralCTF also supports direct HTTPS as a simple deployment option when `server.tls_enabled = true`.
+Provide a PEM certificate, PEM private key, and optionally a PEM intermediate chain through
+`server.tls_cert_path`, `server.tls_key_path`, and `server.tls_chain_path`. Startup fails if TLS is
+enabled and the certificate or key path is missing or cannot be parsed.
+
+### 8.3 Reverse Proxy (nginx)
+
+Recommended production reverse-proxy shape:
 
 ```nginx
 server {
@@ -823,7 +844,7 @@ feralctf/
 ## 10. Implementation Status
 
 Current release: **1.0rc5**. All core sprints (0–13) complete. All items below verified against
-`cargo test` (50 tests passing).
+`cargo test` (72 tests passing).
 
 ### Core
 
@@ -849,6 +870,7 @@ Current release: **1.0rc5**. All core sprints (0–13) complete. All items below
 ### UI / UX
 
 - [x] Web-based user registration form (no out-of-band setup required)
+- [x] Profile password change form with confirmation and session revocation
 - [x] Admin navigation shown only to admin-role accounts
 - [x] Themed error page for unknown routes (404 and other HTTP error codes)
 - [x] Challenge cards — category color, difficulty dot, solve count, solved marker
@@ -878,6 +900,7 @@ Current release: **1.0rc5**. All core sprints (0–13) complete. All items below
 - [x] Announcement broadcast (WebSocket + stored)
 - [x] Submission log (paginated, filterable by team/challenge/result)
 - [x] User ban
+- [x] Admin password assignment with target-user session revocation
 - [x] Team disqualify
 - [x] Challenge flag update through challenge update
 - [x] Database backup download endpoint
@@ -890,11 +913,13 @@ Current release: **1.0rc5**. All core sprints (0–13) complete. All items below
 - [x] Admin action audit log
 - [x] IP logging on submissions when request headers provide an IP
 - [x] Flag sharing detection alert
+- [x] Recommended reverse-proxy TLS deployment plus optional built-in HTTPS mode
 
 ### Deployment
 
 - [x] `feralctf init` subcommand (generate config + empty DB + attachments directory)
 - [x] `feralctf migrate` subcommand
+- [x] Optional direct HTTPS serving via Rustls when enabled in `[server]`
 - [x] Release build produces a self-contained binary with embedded frontend and migrations
 
 Deferred or optional work remains for service packaging, CI/release automation, multi-architecture

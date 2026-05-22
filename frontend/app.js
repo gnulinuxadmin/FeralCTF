@@ -136,11 +136,17 @@ async function logoutUser() {
   try {
     await api('/api/auth/logout', { method: 'POST' });
   } catch (_) {}
+  clearLocalSession();
+}
+
+function clearLocalSession(message) {
   state.token = '';
   state.user = null;
+  state.profile = null;
   sessionStorage.removeItem('feralctf_token');
   renderShell();
   navigate('challenges');
+  if (message) toast(message);
 }
 
 function showRegisterModal() {
@@ -507,6 +513,15 @@ async function renderProfile() {
       </section>
     `}
     <section class="panel">
+      <h2>Change Password</h2>
+      <form id="change-password-form" class="admin-form">
+        <input name="current_password" type="password" autocomplete="current-password" placeholder="current password" required>
+        <input name="new_password" type="password" autocomplete="new-password" placeholder="new password (min 8 chars)" required>
+        <input name="new_password_confirm" type="password" autocomplete="new-password" placeholder="confirm new password" required>
+        <button type="submit">Change Password</button>
+      </form>
+    </section>
+    <section class="panel">
       <h2>Solve History</h2>
       <div class="history">${solves.map(solveRow).join('') || '<p class="muted">No solves yet.</p>'}</div>
     </section>
@@ -519,6 +534,28 @@ async function renderProfile() {
     document.getElementById('copy-invite-btn').addEventListener('click', () => {
       navigator.clipboard.writeText(inviteCode).then(() => toast('invite code copied'));
     });
+  }
+  document.getElementById('change-password-form').addEventListener('submit', changePassword);
+}
+
+async function changePassword(event) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  if (data.new_password !== data.new_password_confirm) {
+    toast('passwords do not match', 'error');
+    return;
+  }
+  try {
+    await api('/api/auth/password', {
+      method: 'PUT',
+      body: JSON.stringify({
+        current_password: data.current_password,
+        new_password: data.new_password,
+      }),
+    });
+    clearLocalSession('password changed; please log in again');
+  } catch (error) {
+    toast(error.message, 'error');
   }
 }
 
@@ -821,8 +858,8 @@ async function renderAdminUsers() {
     content.innerHTML = `
       <h2>Users</h2>
       <table class="scoreboard">
-        <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Team</th><th>Admin</th><th>Ban</th></tr></thead>
-        <tbody>${users.map(adminUserRow).join('') || '<tr><td colspan="6">No users.</td></tr>'}</tbody>
+        <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Team</th><th>Admin</th><th>Ban</th><th>Actions</th></tr></thead>
+        <tbody>${users.map(adminUserRow).join('') || '<tr><td colspan="7">No users.</td></tr>'}</tbody>
       </table>
     `;
     document.querySelectorAll('[data-user-admin]').forEach((input) => {
@@ -834,6 +871,11 @@ async function renderAdminUsers() {
       input.addEventListener('change', () => {
         updateUserRole(Number(input.dataset.userBan), input.checked ? 'banned' : 'player');
       });
+    });
+    document.querySelectorAll('[data-user-password]').forEach((button) => {
+      const id = Number(button.dataset.userPassword);
+      const user = users.find((item) => item.id === id);
+      button.addEventListener('click', () => openAdminPasswordModal(user));
     });
   } catch (error) {
     content.innerHTML = emptyState(error.message);
@@ -850,6 +892,7 @@ function adminUserRow(user) {
       <td>${user.team_id || '-'}</td>
       <td>${toggleCell('Admin', `data-user-admin="${user.id}"`, role === 'admin')}</td>
       <td>${toggleCell('Ban', `data-user-ban="${user.id}"`, role === 'banned')}</td>
+      <td><button type="button" data-user-password="${user.id}">Password</button></td>
     </tr>
   `;
 }
@@ -865,6 +908,58 @@ async function updateUserRole(id, role) {
   } catch (error) {
     toast(error.message, 'error');
     renderAdminUsers();
+  }
+}
+
+function openAdminPasswordModal(user) {
+  if (!user) return;
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `
+    <div class="modal-panel">
+      <button class="modal-close" type="button" aria-label="Close">x</button>
+      <h2>Set Password</h2>
+      <p class="muted">${escapeHtml(user.username)}</p>
+      <form id="admin-password-form" class="admin-form">
+        <input name="password" type="password" autocomplete="new-password" placeholder="new password (min 8 chars)" required>
+        <input name="password_confirm" type="password" autocomplete="new-password" placeholder="confirm new password" required>
+        <button type="submit">Set Password</button>
+      </form>
+    </div>
+  `;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.querySelector('.modal-close').addEventListener('click', closeModal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeModal();
+  }, { once: true });
+  modal.querySelector('#admin-password-form').addEventListener('submit', (event) =>
+    updateUserPassword(event, user.id),
+  );
+}
+
+async function updateUserPassword(event, id) {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target).entries());
+  if (data.password !== data.password_confirm) {
+    toast('passwords do not match', 'error');
+    return;
+  }
+  try {
+    await api(`/api/admin/users/${id}/password`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        password: data.password,
+        password_confirm: data.password_confirm,
+      }),
+    });
+    closeModal();
+    if (state.user && state.user.id === id) {
+      clearLocalSession('password updated; please log in again');
+    } else {
+      toast('password updated');
+    }
+  } catch (error) {
+    toast(error.message, 'error');
   }
 }
 

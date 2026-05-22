@@ -1256,6 +1256,9 @@ no new sprint scope is required.
   and reject removing the last admin. Admin → Teams now exposes a Ban toggle backed by
   `PUT /api/admin/teams/{id}/disqualified`, using existing `is_disqualified` semantics with score recalculation,
   scoreboard cache invalidation, and `team.disqualify` / `team.reinstate` audit actions.
+- **Password management UI** — `renderProfile()` now includes a Change Password panel with current
+  password, new password, and confirmation fields. Admin → Users includes a Password action that
+  opens a modal for manual password assignment.
 
 ### Backend
 
@@ -1264,6 +1267,16 @@ no new sprint scope is required.
   unchanged. Admin UI now fetches from the admin endpoint so hidden challenges are visible.
 - **Route wiring** — `src/routes.rs` wires `list_admin_challenges` on `GET /api/admin/challenges`
   (previously only `POST` was registered on that path).
+- **Password session revocation** — `PUT /api/auth/password` now revokes all sessions for the
+  user after a successful password change. Admin password assignment is exposed at
+  `PUT /api/admin/users/{id}/password`, validates confirmation, hashes with Argon2id, revokes the
+  target user's sessions, and audits `user.password_update`.
+- **Optional built-in HTTPS mode** — Production deployments should still prefer nginx/Caddy for
+  TLS termination, certificate renewal, redirects, caching, request limits, and hosting adjacent
+  static files. `[server]` also supports `tls_enabled`, `tls_cert_path`, `tls_key_path`, and
+  optional `tls_chain_path`, with matching `FERALCTF_SERVER_TLS_*` environment overrides. When
+  enabled, startup serves the existing Axum router through a Rustls-backed listener using the
+  supplied PEM certificate, private key, and optional intermediate chain.
 
 ### Bug Fixes + Polish (post-rc5)
 

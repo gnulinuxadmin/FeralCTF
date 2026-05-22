@@ -105,6 +105,12 @@ pub struct UpdateUserRoleRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UpdateUserPasswordRequest {
+    pub password: String,
+    pub password_confirm: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UpdateTeamDisqualifiedRequest {
     pub is_disqualified: bool,
 }
@@ -566,6 +572,61 @@ pub async fn update_user_role(
         },
     )?;
     Ok(Json(user))
+}
+
+pub async fn update_user_password(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Json(req): Json<UpdateUserPasswordRequest>,
+) -> HandlerResult<Json<serde_json::Value>> {
+    if req.password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "password must be at least 8 characters".into(),
+        ));
+    }
+    if req.password != req.password_confirm {
+        return Err(AppError::BadRequest("passwords do not match".into()));
+    }
+
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let username = conn
+        .query_row(
+            "SELECT username FROM users WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(|err| match err {
+            rusqlite::Error::QueryReturnedNoRows => AppError::NotFound("user not found".into()),
+            other => AppError::Database(other),
+        })?;
+
+    let password_hash = auth::hash_password(&req.password)?;
+    conn.execute(
+        "UPDATE users SET password_hash = ?1 WHERE id = ?2",
+        rusqlite::params![password_hash, id],
+    )?;
+    drop(conn);
+    auth::revoke_user_sessions(&state.db, id)?;
+
+    let conn = state
+        .db
+        .get()
+        .map_err(|e| anyhow::anyhow!("db pool: {e}"))?;
+    let (admin_id, ip) = admin_audit_context(&state, &headers)?;
+    crate::db::audit(
+        &conn,
+        admin_id,
+        "user.password_update",
+        Some(&format!("user:{id}")),
+        Some(&username),
+        ip.as_deref(),
+    )?;
+
+    Ok(Json(serde_json::json!({ "updated": true })))
 }
 
 // ---- team management ----
@@ -1368,6 +1429,95 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 1, "missing audit action {action}");
         }
+    }
+
+    #[tokio::test]
+    async fn admin_password_update_rejects_mismatch() {
+        let state = test_state();
+        let headers = admin_headers(&state);
+        let target_id = {
+            let conn = state.db.get().unwrap();
+            let req = RegisterRequest {
+                username: "target".to_string(),
+                email: None,
+                password: "password123".to_string(),
+                team_name: None,
+                invite_code: None,
+            };
+            User::create(&conn, &req, "hash").unwrap().id
+        };
+
+        let err = update_user_password(
+            State(state),
+            headers,
+            Path(target_id),
+            Json(UpdateUserPasswordRequest {
+                password: "new-password123".to_string(),
+                password_confirm: "different-password123".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn admin_password_update_hashes_password_revokes_sessions_and_audits() {
+        let state = test_state();
+        let headers = admin_headers(&state);
+        let (target_id, token) = {
+            let conn = state.db.get().unwrap();
+            let req = RegisterRequest {
+                username: "target".to_string(),
+                email: None,
+                password: "password123".to_string(),
+                team_name: None,
+                invite_code: None,
+            };
+            let password_hash = auth::hash_password("password123").unwrap();
+            let user = User::create(&conn, &req, &password_hash).unwrap();
+            let now = chrono::Utc::now().timestamp() as u64;
+            let claims = auth::Claims {
+                sub: user.id,
+                role: user.role.clone(),
+                team_id: user.team_id,
+                iat: now,
+                exp: now + 3600,
+            };
+            let token = auth::sign_jwt(&claims, &state.config.auth.jwt_secret).unwrap();
+            (user.id, token)
+        };
+        auth::create_session(&state.db, target_id, &token, 1).unwrap();
+
+        let Json(response) = update_user_password(
+            State(state.clone()),
+            headers,
+            Path(target_id),
+            Json(UpdateUserPasswordRequest {
+                password: "assigned-password123".to_string(),
+                password_confirm: "assigned-password123".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response["updated"], true);
+        assert!(response.get("password").is_none());
+        assert!(response.get("password_hash").is_none());
+        assert!(!auth::is_session_valid(&state.db, &auth::hash_token(&token)).unwrap());
+
+        let conn = state.db.get().unwrap();
+        let user = User::find_by_id(&conn, target_id).unwrap().unwrap();
+        assert!(auth::verify_password("assigned-password123", &user.password_hash).unwrap());
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = 'user.password_update'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

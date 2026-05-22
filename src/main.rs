@@ -197,6 +197,7 @@ async fn run_server(
         config.server.port = port;
     }
     let addr: SocketAddr = format!("{}:{}", config.server.host, config.server.port).parse()?;
+    let server_config = config.server.clone();
     let pool = feralctf::db::init_pool(&config.database.path)?;
     {
         let conn = pool.get()?;
@@ -216,9 +217,23 @@ async fn run_server(
     let _rate_limit_gc = feralctf::anticheat::spawn_rate_limiter_gc_task(rate_limiter);
 
     let app = feralctf::routes::create_router(state);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(%addr, "feralctf listening");
-    axum::serve(listener, app).await?;
+    serve_app(addr, app, &server_config).await
+}
+
+async fn serve_app(
+    addr: SocketAddr,
+    app: axum::Router,
+    server_config: &feralctf::config::ServerConfig,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if server_config.tls_enabled {
+        let listener = feralctf::tls::TlsListener::bind(addr, server_config).await?;
+        tracing::info!(%addr, "feralctf listening with HTTPS");
+        axum::serve(listener, app).await?;
+    } else {
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        tracing::info!(%addr, "feralctf listening");
+        axum::serve(listener, app).await?;
+    }
     Ok(())
 }
 

@@ -23,6 +23,10 @@ pub struct ServerConfig {
     pub host: String,
     pub base_url: String,
     pub allowed_origins: Vec<String>,
+    pub tls_enabled: bool,
+    pub tls_cert_path: String,
+    pub tls_key_path: String,
+    pub tls_chain_path: String,
 }
 
 impl Default for ServerConfig {
@@ -32,6 +36,10 @@ impl Default for ServerConfig {
             host: "0.0.0.0".to_string(),
             base_url: "http://localhost:8080".to_string(),
             allowed_origins: Vec::new(),
+            tls_enabled: false,
+            tls_cert_path: String::new(),
+            tls_key_path: String::new(),
+            tls_chain_path: String::new(),
         }
     }
 }
@@ -189,6 +197,22 @@ fn apply_env_overrides(config: &mut Config) -> Result<(), anyhow::Error> {
         &mut config.server.allowed_origins,
         "FERALCTF_SERVER_ALLOWED_ORIGINS",
     );
+    set_from_env(
+        &mut config.server.tls_enabled,
+        "FERALCTF_SERVER_TLS_ENABLED",
+    )?;
+    set_string_from_env(
+        &mut config.server.tls_cert_path,
+        "FERALCTF_SERVER_TLS_CERT_PATH",
+    );
+    set_string_from_env(
+        &mut config.server.tls_key_path,
+        "FERALCTF_SERVER_TLS_KEY_PATH",
+    );
+    set_string_from_env(
+        &mut config.server.tls_chain_path,
+        "FERALCTF_SERVER_TLS_CHAIN_PATH",
+    );
 
     set_string_from_env(&mut config.competition.name, "FERALCTF_COMPETITION_NAME");
     set_optional_string_from_env(
@@ -312,6 +336,14 @@ fn validate(config: &Config) -> Result<(), anyhow::Error> {
     if config.server.port == 0 {
         anyhow::bail!("server.port must be greater than 0");
     }
+    if config.server.tls_enabled {
+        if config.server.tls_cert_path.trim().is_empty() {
+            anyhow::bail!("server.tls_cert_path is required when TLS is enabled");
+        }
+        if config.server.tls_key_path.trim().is_empty() {
+            anyhow::bail!("server.tls_key_path is required when TLS is enabled");
+        }
+    }
     if config.competition.max_team_size == 0 {
         anyhow::bail!("competition.max_team_size must be greater than 0");
     }
@@ -349,6 +381,10 @@ port = 8080
 host = "0.0.0.0"
 base_url = "http://localhost:8080"
 allowed_origins = []
+tls_enabled = false
+tls_cert_path = ""
+tls_key_path = ""
+tls_chain_path = ""
 
 [competition]
 name = "FeralCTF"
@@ -410,6 +446,7 @@ mod tests {
         let config = load("/tmp/feralctf-missing-test-config.toml").unwrap();
 
         assert_eq!(config.server.port, 8080);
+        assert!(!config.server.tls_enabled);
         assert_eq!(config.database.path, "./ctf.db");
         assert_eq!(config.storage.attachments_path, "./attachments");
         assert_eq!(config.auth.jwt_secret.len(), 64);
@@ -421,6 +458,10 @@ mod tests {
         clear_test_env();
         unsafe {
             env::set_var("FERALCTF_SERVER_PORT", "9999");
+            env::set_var("FERALCTF_SERVER_TLS_ENABLED", "true");
+            env::set_var("FERALCTF_SERVER_TLS_CERT_PATH", "/tmp/cert.pem");
+            env::set_var("FERALCTF_SERVER_TLS_KEY_PATH", "/tmp/key.pem");
+            env::set_var("FERALCTF_SERVER_TLS_CHAIN_PATH", "/tmp/chain.pem");
             env::set_var(
                 "FERALCTF_STORAGE_ATTACHMENTS_PATH",
                 "/tmp/feralctf-test-attachments",
@@ -430,6 +471,10 @@ mod tests {
         let config = load("/tmp/feralctf-missing-test-config.toml").unwrap();
 
         assert_eq!(config.server.port, 9999);
+        assert!(config.server.tls_enabled);
+        assert_eq!(config.server.tls_cert_path, "/tmp/cert.pem");
+        assert_eq!(config.server.tls_key_path, "/tmp/key.pem");
+        assert_eq!(config.server.tls_chain_path, "/tmp/chain.pem");
         assert_eq!(
             config.storage.attachments_path,
             "/tmp/feralctf-test-attachments"
@@ -467,7 +512,30 @@ attachments_path = "/tmp/feralctf-file-test-attachments"
         generate_example(&example_path).unwrap();
         let example = fs::read_to_string(&example_path).unwrap();
         assert!(example.contains("[server]"));
+        assert!(example.contains("tls_enabled = false"));
         assert!(example.contains("[rate_limit]"));
+    }
+
+    #[test]
+    fn test_tls_enabled_requires_cert_and_key_paths() {
+        let _guard = env_lock();
+        clear_test_env();
+        let path = temp_config_path("feralctf-tls-config-test");
+
+        fs::write(
+            &path,
+            r#"
+[server]
+tls_enabled = true
+
+[storage]
+attachments_path = "/tmp/feralctf-tls-test-attachments"
+"#,
+        )
+        .unwrap();
+
+        let err = load(&path).unwrap_err().to_string();
+        assert!(err.contains("server.tls_cert_path is required"));
     }
 
     fn clear_test_env() {
@@ -475,6 +543,10 @@ attachments_path = "/tmp/feralctf-file-test-attachments"
             "FERALCTF_SERVER_PORT",
             "FERALCTF_SERVER_HOST",
             "FERALCTF_SERVER_BASE_URL",
+            "FERALCTF_SERVER_TLS_ENABLED",
+            "FERALCTF_SERVER_TLS_CERT_PATH",
+            "FERALCTF_SERVER_TLS_KEY_PATH",
+            "FERALCTF_SERVER_TLS_CHAIN_PATH",
             "FERALCTF_COMPETITION_NAME",
             "FERALCTF_COMPETITION_START_TIME",
             "FERALCTF_COMPETITION_END_TIME",

@@ -371,6 +371,26 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - **Logo version hover** — The topbar logo image now has a `title="Version 1.0"` tooltip.
 - **Larger logo icon** — `.brand-icon` now renders the topbar logo at 60x60 px.
 
+### Post-Sprint 13 continued (session 4)
+
+- **Profile password change UI** — `renderProfile()` in `frontend/app.js` now shows a Change
+  Password panel with current password, new password, and confirmation fields. The browser rejects
+  mismatched confirmation before calling `PUT /api/auth/password`.
+- **Password-change session revocation** — `auth::revoke_user_sessions()` was added in
+  `src/auth.rs`. `PUT /api/auth/password` updates the Argon2id hash and revokes all sessions for
+  the authenticated user, so the UI clears `feralctf_token` and returns to login after success.
+- **Admin password assignment** — `PUT /api/admin/users/{id}/password` was added in
+  `src/handlers/admin.rs` and wired in `src/routes.rs`. It accepts `password` and
+  `password_confirm`, validates length and confirmation, hashes with Argon2id, revokes target-user
+  sessions, and audits `user.password_update`. Admin → Users now has a Password button that opens
+  the assignment modal.
+- **Optional built-in HTTPS mode** — Reverse-proxy TLS with nginx/Caddy remains the recommended
+  production deployment for certificate renewal, redirects, caching, request limits, and hosting
+  adjacent static files. `ServerConfig` also includes `tls_enabled`, `tls_cert_path`,
+  `tls_key_path`, and optional `tls_chain_path`, all with `FERALCTF_SERVER_TLS_*` environment
+  overrides. `src/tls.rs` implements a Rustls-backed Axum listener that loads PEM certificate,
+  private key, and optional chain; `src/main.rs` selects HTTPS when `server.tls_enabled = true`.
+
 ## Known Cautions
 
 - Do not revive old single-connection database abstractions.
