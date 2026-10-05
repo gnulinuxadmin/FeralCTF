@@ -21,6 +21,10 @@ pub struct Challenge {
     pub unlock_requires: Option<i64>,
     pub is_hidden: bool,
     pub created_at: i64,
+    /// AES-256-GCM copy of the flag for admin reveal (see `flag_cipher`).
+    /// Never serialized; submissions are verified against `flag_hash`.
+    #[serde(skip_serializing, default)]
+    pub flag_ciphertext: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,6 +41,9 @@ pub struct ChallengePublic {
     pub file_count: i64,
     pub hint_count: i64,
     pub unlock_requires: Option<i64>,
+    /// True until the team solves the `unlock_requires` prerequisite. Locked
+    /// challenges are listed without their description.
+    pub locked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +77,17 @@ pub struct Submission {
     pub submitted_at: i64,
 }
 
+/// Hint as seen by admins: full content plus how many teams unlocked it.
+#[derive(Debug, Clone, Serialize)]
+pub struct HintAdmin {
+    pub id: i64,
+    pub challenge_id: i64,
+    pub content: String,
+    pub cost_points: i64,
+    pub sort_order: i64,
+    pub unlock_count: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct HintPublic {
     pub id: i64,
@@ -82,25 +100,25 @@ pub struct HintPublic {
 const SELECT_BY_ID: &str =
     "SELECT id, slug, title, description, category, flag_hash, flag_salt, flag_type,
      flag_case_sensitive, points, max_points, min_points, decay_rate, author,
-     tags, unlock_requires, is_hidden, created_at
+     tags, unlock_requires, is_hidden, created_at, flag_ciphertext
      FROM challenges WHERE id = ?1";
 
 const SELECT_BY_SLUG: &str =
     "SELECT id, slug, title, description, category, flag_hash, flag_salt, flag_type,
      flag_case_sensitive, points, max_points, min_points, decay_rate, author,
-     tags, unlock_requires, is_hidden, created_at
+     tags, unlock_requires, is_hidden, created_at, flag_ciphertext
      FROM challenges WHERE slug = ?1";
 
 const SELECT_VISIBLE: &str =
     "SELECT id, slug, title, description, category, flag_hash, flag_salt, flag_type,
      flag_case_sensitive, points, max_points, min_points, decay_rate, author,
-     tags, unlock_requires, is_hidden, created_at
+     tags, unlock_requires, is_hidden, created_at, flag_ciphertext
      FROM challenges WHERE is_hidden = 0 ORDER BY category, points";
 
 const SELECT_ALL: &str =
     "SELECT id, slug, title, description, category, flag_hash, flag_salt, flag_type,
      flag_case_sensitive, points, max_points, min_points, decay_rate, author,
-     tags, unlock_requires, is_hidden, created_at
+     tags, unlock_requires, is_hidden, created_at, flag_ciphertext
      FROM challenges ORDER BY category, points";
 
 impl Challenge {
@@ -178,12 +196,24 @@ impl Challenge {
         Ok(n)
     }
 
+    pub fn is_locked_for_team(&self, conn: &DbConn, team_id: i64) -> Result<bool, AppError> {
+        match self.unlock_requires {
+            Some(required) => Ok(!Self::is_solved_by_team(conn, required, team_id)?),
+            None => Ok(false),
+        }
+    }
+
     pub fn to_public(&self, conn: &DbConn, team_id: i64) -> Result<ChallengePublic, AppError> {
+        let locked = self.is_locked_for_team(conn, team_id)?;
         Ok(ChallengePublic {
             id: self.id,
             slug: self.slug.clone(),
             title: self.title.clone(),
-            description: self.description.clone(),
+            description: if locked {
+                String::new()
+            } else {
+                self.description.clone()
+            },
             category: self.category.clone(),
             points: self.points,
             solve_count: Self::solve_count(conn, self.id)?,
@@ -192,6 +222,7 @@ impl Challenge {
             file_count: Self::file_count(conn, self.id)?,
             hint_count: Self::hint_count(conn, self.id)?,
             unlock_requires: self.unlock_requires,
+            locked,
         })
     }
 
@@ -215,6 +246,7 @@ impl Challenge {
             unlock_requires: row.get(15)?,
             is_hidden: row.get::<_, i64>(16)? != 0,
             created_at: row.get(17)?,
+            flag_ciphertext: row.get(18)?,
         })
     }
 }
@@ -261,6 +293,80 @@ impl Hint {
         Ok(hints)
     }
 
+    pub fn list_admin(conn: &DbConn, challenge_id: i64) -> Result<Vec<HintAdmin>, AppError> {
+        let mut stmt = conn.prepare(
+            "SELECT h.id, h.challenge_id, h.content, h.cost_points, h.sort_order,
+                    (SELECT COUNT(*) FROM hint_unlocks hu WHERE hu.hint_id = h.id)
+             FROM hints h
+             WHERE h.challenge_id = ?1
+             ORDER BY h.sort_order, h.id",
+        )?;
+        let hints = stmt
+            .query_map(rusqlite::params![challenge_id], |row| {
+                Ok(HintAdmin {
+                    id: row.get(0)?,
+                    challenge_id: row.get(1)?,
+                    content: row.get(2)?,
+                    cost_points: row.get(3)?,
+                    sort_order: row.get(4)?,
+                    unlock_count: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(hints)
+    }
+
+    /// Insert a hint. Without an explicit `sort_order` it goes after the
+    /// challenge's last hint.
+    pub fn create(
+        conn: &DbConn,
+        challenge_id: i64,
+        content: &str,
+        cost_points: i64,
+        sort_order: Option<i64>,
+    ) -> Result<Self, AppError> {
+        let sort_order = match sort_order {
+            Some(order) => order,
+            None => conn.query_row(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM hints WHERE challenge_id = ?1",
+                rusqlite::params![challenge_id],
+                |row| row.get(0),
+            )?,
+        };
+        conn.execute(
+            "INSERT INTO hints (challenge_id, content, cost_points, sort_order)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![challenge_id, content, cost_points, sort_order],
+        )?;
+        Self::find_by_id(conn, conn.last_insert_rowid())?
+            .ok_or_else(|| anyhow::anyhow!("hint not found after insert").into())
+    }
+
+    pub fn update(
+        conn: &DbConn,
+        id: i64,
+        content: &str,
+        cost_points: i64,
+        sort_order: i64,
+    ) -> Result<(), AppError> {
+        conn.execute(
+            "UPDATE hints SET content = ?1, cost_points = ?2, sort_order = ?3 WHERE id = ?4",
+            rusqlite::params![content, cost_points, sort_order, id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a hint together with its unlocks (refunding those teams once
+    /// scores are recalculated). Returns the number of unlocks removed.
+    pub fn delete(conn: &DbConn, id: i64) -> Result<usize, AppError> {
+        let refunded = conn.execute(
+            "DELETE FROM hint_unlocks WHERE hint_id = ?1",
+            rusqlite::params![id],
+        )?;
+        conn.execute("DELETE FROM hints WHERE id = ?1", rusqlite::params![id])?;
+        Ok(refunded)
+    }
+
     pub fn is_unlocked(conn: &DbConn, team_id: i64, hint_id: i64) -> Result<bool, AppError> {
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM hint_unlocks WHERE team_id = ?1 AND hint_id = ?2",
@@ -270,19 +376,21 @@ impl Hint {
         Ok(n > 0)
     }
 
+    /// Record an unlock. Returns false when the team already had it, so a
+    /// concurrent double request is only charged once.
     pub fn unlock(
         conn: &DbConn,
         team_id: i64,
         hint_id: i64,
         points_deducted: i64,
         unlocked_at: i64,
-    ) -> Result<(), AppError> {
-        conn.execute(
-            "INSERT INTO hint_unlocks (team_id, hint_id, points_deducted, unlocked_at)
+    ) -> Result<bool, AppError> {
+        let inserted = conn.execute(
+            "INSERT OR IGNORE INTO hint_unlocks (team_id, hint_id, points_deducted, unlocked_at)
              VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![team_id, hint_id, points_deducted, unlocked_at],
         )?;
-        Ok(())
+        Ok(inserted == 1)
     }
 
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
@@ -303,18 +411,63 @@ impl ChallengeFile {
              FROM files WHERE challenge_id = ?1 ORDER BY filename",
         )?;
         let files = stmt
-            .query_map(rusqlite::params![challenge_id], |row| {
-                Ok(ChallengeFile {
-                    id: row.get(0)?,
-                    challenge_id: row.get(1)?,
-                    filename: row.get(2)?,
-                    storage_path: row.get(3)?,
-                    size_bytes: row.get(4)?,
-                    sha256: row.get(5)?,
-                })
-            })?
+            .query_map(rusqlite::params![challenge_id], Self::from_row)?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(files)
+    }
+
+    pub fn find_by_id(conn: &DbConn, id: i64) -> Result<Option<Self>, AppError> {
+        let result = conn.query_row(
+            "SELECT id, challenge_id, filename, storage_path, size_bytes, sha256
+             FROM files WHERE id = ?1",
+            rusqlite::params![id],
+            Self::from_row,
+        );
+        match result {
+            Ok(file) => Ok(Some(file)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(AppError::Database(err)),
+        }
+    }
+
+    /// Attachments are links: `filename` is the label, `storage_path` the URL.
+    pub fn create(
+        conn: &DbConn,
+        challenge_id: i64,
+        label: &str,
+        url: &str,
+    ) -> Result<Self, AppError> {
+        conn.execute(
+            "INSERT INTO files (challenge_id, filename, storage_path, size_bytes, sha256)
+             VALUES (?1, ?2, ?3, 0, '')",
+            rusqlite::params![challenge_id, label, url],
+        )?;
+        Self::find_by_id(conn, conn.last_insert_rowid())?
+            .ok_or_else(|| anyhow::anyhow!("file not found after insert").into())
+    }
+
+    pub fn update(conn: &DbConn, id: i64, label: &str, url: &str) -> Result<(), AppError> {
+        conn.execute(
+            "UPDATE files SET filename = ?1, storage_path = ?2 WHERE id = ?3",
+            rusqlite::params![label, url, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete(conn: &DbConn, id: i64) -> Result<(), AppError> {
+        conn.execute("DELETE FROM files WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(ChallengeFile {
+            id: row.get(0)?,
+            challenge_id: row.get(1)?,
+            filename: row.get(2)?,
+            storage_path: row.get(3)?,
+            size_bytes: row.get(4)?,
+            sha256: row.get(5)?,
+        })
     }
 }
 
@@ -385,6 +538,27 @@ pub fn insert_score_history(
     Ok(())
 }
 
+/// Attachments are external links: they must be absolute `http(s)://` URLs
+/// with a host. Returns the trimmed URL.
+pub fn validate_attachment_url(url: &str) -> Result<String, AppError> {
+    let url = url.trim();
+    if is_absolute_attachment_url(url) {
+        Ok(url.to_string())
+    } else {
+        Err(AppError::BadRequest(
+            "attachment url must be an absolute http:// or https:// URL".into(),
+        ))
+    }
+}
+
+pub fn is_absolute_attachment_url(url: &str) -> bool {
+    let Ok(uri) = url.parse::<axum::http::Uri>() else {
+        return false;
+    };
+    matches!(uri.scheme_str(), Some("http") | Some("https"))
+        && uri.host().is_some_and(|host| !host.is_empty())
+}
+
 fn parse_tags(tags: Option<&str>) -> Vec<String> {
     tags.and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
         .unwrap_or_default()
@@ -422,6 +596,31 @@ mod tests {
         )
         .unwrap();
         conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn attachment_urls_must_be_absolute_http() {
+        for ok in [
+            "https://example.com/x",
+            "http://files.local:8080/a/b.zip?x=1",
+        ] {
+            assert_eq!(validate_attachment_url(&format!("  {ok} ")).unwrap(), ok);
+        }
+        for bad in [
+            "/x",
+            "x.bin",
+            "slug/file.bin",
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "ftp://example.com/x",
+            "https://",
+            "",
+        ] {
+            assert!(
+                validate_attachment_url(bad).is_err(),
+                "{bad} should be rejected"
+            );
+        }
     }
 
     #[test]

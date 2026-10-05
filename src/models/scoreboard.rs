@@ -33,18 +33,44 @@ impl ScoreboardState {
              GROUP BY t.id
              ORDER BY t.score DESC, t.last_solve_at ASC NULLS LAST",
         )?;
-        let rows: Vec<(i64, String, i64, i64, Option<i64>)> = stmt
-            .query_map([], |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            })?
-            .collect::<Result<_, _>>()?;
+        let rows: Vec<ScoreRow> = stmt.query_map([], score_row)?.collect::<Result<_, _>>()?;
+        Ok(Self::ranked(rows, total_visible_points, generated_at))
+    }
 
+    /// Scoreboard as it stood at `at` (used while scores are frozen): only
+    /// solves and hint unlocks up to that moment count.
+    pub fn build_as_of(conn: &DbConn, at: i64) -> Result<Self, AppError> {
+        let generated_at = chrono::Utc::now().timestamp();
+        let total_visible_points = conn.query_row(
+            "SELECT COALESCE(SUM(points), 0) FROM challenges WHERE is_hidden = 0",
+            [],
+            |row| row.get(0),
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT t.id, t.name,
+                    CASE WHEN t.is_disqualified = 1 THEN 0 ELSE
+                        COALESCE((SELECT SUM(c.points) FROM solves s
+                                  JOIN challenges c ON c.id = s.challenge_id
+                                  WHERE s.team_id = t.id AND s.solved_at <= ?1), 0)
+                        - COALESCE((SELECT SUM(hu.points_deducted) FROM hint_unlocks hu
+                                    WHERE hu.team_id = t.id AND hu.unlocked_at <= ?1), 0)
+                    END AS score,
+                    (SELECT COUNT(*) FROM solves s
+                     WHERE s.team_id = t.id AND s.solved_at <= ?1) AS solve_count,
+                    CASE WHEN t.is_disqualified = 1 THEN NULL ELSE
+                        (SELECT MAX(s.solved_at) FROM solves s
+                         WHERE s.team_id = t.id AND s.solved_at <= ?1)
+                    END AS last_solve_at
+             FROM teams t
+             ORDER BY score DESC, last_solve_at ASC NULLS LAST",
+        )?;
+        let rows: Vec<ScoreRow> = stmt
+            .query_map(rusqlite::params![at], score_row)?
+            .collect::<Result<_, _>>()?;
+        Ok(Self::ranked(rows, total_visible_points, generated_at))
+    }
+
+    fn ranked(rows: Vec<ScoreRow>, total_visible_points: i64, generated_at: i64) -> Self {
         let mut teams = Vec::with_capacity(rows.len());
         let mut rank: i64 = 1;
         for (i, (team_id, team_name, score, solve_count, last_solve_at)) in rows.iter().enumerate()
@@ -65,12 +91,24 @@ impl ScoreboardState {
             });
         }
 
-        Ok(ScoreboardState {
+        ScoreboardState {
             teams,
             total_visible_points,
             generated_at,
-        })
+        }
     }
+}
+
+type ScoreRow = (i64, String, i64, i64, Option<i64>);
+
+fn score_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ScoreRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+    ))
 }
 
 #[cfg(test)]

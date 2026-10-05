@@ -44,16 +44,23 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, AppError> {
         .is_ok())
 }
 
-pub fn hash_flag(flag: &str, salt: &str) -> String {
-    let normalized = flag.trim().to_lowercase();
+/// Hash a static flag. Flags are always trimmed; unless the challenge is
+/// case sensitive they are also lowercased before hashing.
+pub fn hash_flag(flag: &str, salt: &str, case_sensitive: bool) -> String {
+    let trimmed = flag.trim();
+    let normalized = if case_sensitive {
+        trimmed.to_string()
+    } else {
+        trimmed.to_lowercase()
+    };
     let mut hasher = Sha256::new();
     hasher.update(normalized.as_bytes());
     hasher.update(salt.as_bytes());
     to_hex(&hasher.finalize())
 }
 
-pub fn verify_flag(submitted: &str, stored_hash: &str, salt: &str) -> bool {
-    hash_flag(submitted, salt) == stored_hash
+pub fn verify_flag(submitted: &str, stored_hash: &str, salt: &str, case_sensitive: bool) -> bool {
+    hash_flag(submitted, salt, case_sensitive) == stored_hash
 }
 
 pub fn sign_jwt(claims: &Claims, secret: &str) -> Result<String, AppError> {
@@ -225,9 +232,18 @@ mod tests {
     #[test]
     fn flag_hash_is_case_insensitive_and_trimmed() {
         let salt = "challenge-salt";
-        let hash = hash_flag(" flag{Case_Mix} ", salt);
-        assert!(verify_flag("FLAG{case_mix}", &hash, salt));
-        assert!(verify_flag("  flag{case_mix}  ", &hash, salt));
-        assert!(!verify_flag("flag{other}", &hash, salt));
+        let hash = hash_flag(" flag{Case_Mix} ", salt, false);
+        assert!(verify_flag("FLAG{case_mix}", &hash, salt, false));
+        assert!(verify_flag("  flag{case_mix}  ", &hash, salt, false));
+        assert!(!verify_flag("flag{other}", &hash, salt, false));
+    }
+
+    #[test]
+    fn case_sensitive_flag_hash_requires_exact_case() {
+        let salt = "challenge-salt";
+        let hash = hash_flag(" flag{Case_Mix} ", salt, true);
+        assert!(verify_flag("flag{Case_Mix}", &hash, salt, true));
+        assert!(verify_flag("  flag{Case_Mix} ", &hash, salt, true));
+        assert!(!verify_flag("flag{case_mix}", &hash, salt, true));
     }
 }

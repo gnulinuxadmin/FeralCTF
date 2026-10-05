@@ -7,6 +7,9 @@ const state = {
   challenges: [],
   selectedCategory: 'all',
   query: '',
+  showSolved: true,
+  announcements: [],
+  competition: null,
   scoreboard: { teams: [] },
   profile: null,
   ws: null,
@@ -15,6 +18,7 @@ const state = {
 
 const app = document.getElementById('app');
 const basePath = detectBasePath();
+const appVersion = document.querySelector('meta[name="feralctf-version"]')?.content || '';
 
 document.addEventListener('DOMContentLoaded', init);
 
@@ -22,17 +26,25 @@ async function init() {
   renderShell();
   connectWebSocket();
   await loadSession();
-  await Promise.all([loadChallenges(), loadScoreboard()]);
+  await Promise.all([loadChallenges(), loadScoreboard(), loadCompetition(), loadAnnouncements()]);
   updateAuth();
-  navigate('challenges');
+  const returnView = sessionStorage.getItem('feralctf_return_view');
+  sessionStorage.removeItem('feralctf_return_view');
+  if (returnView === 'admin-settings' && state.user?.role === 'admin') {
+    navigate('admin');
+    renderAdmin('settings');
+    toast('branding saved');
+  } else {
+    navigate('challenges');
+  }
 }
 
 function renderShell() {
   app.innerHTML = `
     <header class="topbar">
       <div class="brand">
-        <img src="${appPath('/feral10.jpg')}" class="brand-icon" alt="" title="Version 1.0">
-        <h1>Feral CTF</h1>
+        <img id="brand-logo" src="${appPath('/feral10.jpg')}" class="brand-icon" alt="" title="Version ${escapeHtml(appVersion)}">
+        <h1 id="brand-name">${escapeHtml(document.title || 'FeralCTF')}</h1>
       </div>
       <nav class="nav">
         <button data-view="challenges">Challenges</button>
@@ -46,6 +58,7 @@ function renderShell() {
         <button type="button" id="show-register-btn">Register</button>
       </form>
     </header>
+    <div id="competition-banner" class="competition-banner" hidden></div>
     <main id="view"></main>
     <div id="modal" class="modal" aria-hidden="true"></div>
     <div id="toast" class="toast" role="status"></div>
@@ -56,6 +69,80 @@ function renderShell() {
   });
   document.getElementById('auth-form').addEventListener('submit', loginUser);
   document.getElementById('show-register-btn').addEventListener('click', showRegisterModal);
+  const logo = document.getElementById('brand-logo');
+  logo.addEventListener('error', () => {
+    // A broken external logo falls back to the built-in one.
+    const fallback = appPath('/feral10.jpg');
+    if (!logo.src.endsWith(fallback)) logo.src = fallback;
+  });
+  applyBranding();
+  renderCompetitionBanner();
+}
+
+async function loadCompetition() {
+  try {
+    state.competition = await api('/api/competition');
+  } catch (_) {
+    state.competition = null;
+  }
+  applyBranding();
+  renderCompetitionBanner();
+}
+
+// Competition name and logo come from Admin -> Settings -> Branding.
+function applyBranding() {
+  const status = state.competition;
+  if (!status) return;
+  const name = status.name || 'FeralCTF';
+  document.title = name;
+  const heading = document.getElementById('brand-name');
+  if (heading) heading.textContent = name;
+  const logo = document.getElementById('brand-logo');
+  if (logo) {
+    const src = status.logo_url || appPath('/feral10.jpg');
+    if (logo.getAttribute('src') !== src) logo.setAttribute('src', src);
+    logo.alt = status.logo_url ? `${name} logo` : '';
+  }
+}
+
+function renderCompetitionBanner() {
+  const banner = document.getElementById('competition-banner');
+  if (!banner) return;
+  const status = state.competition;
+  const now = Date.now() / 1000;
+  let message = '';
+  if (status && !status.started) {
+    message = status.start_time ? `Competition starts ${formatTime(Date.parse(status.start_time) / 1000)}` : 'Competition has not started yet';
+  } else if (status && status.ended) {
+    message = 'Competition has ended — submissions are closed';
+  } else if (status && status.frozen_at && status.frozen_at <= now) {
+    message = 'Scoreboard is frozen';
+  }
+  banner.textContent = message;
+  banner.hidden = !message;
+}
+
+async function loadAnnouncements() {
+  try {
+    state.announcements = (await api('/api/announcements')) || [];
+  } catch (_) {
+    state.announcements = [];
+  }
+}
+
+function announcementStrip() {
+  if (!state.announcements.length) return '';
+  return `
+    <section class="announcements">
+      ${state.announcements.slice(0, 3).map((item) => `
+        <article class="announcement">
+          <strong>${escapeHtml(item.title)}</strong>
+          <time class="muted">${formatTime(item.created_at)}</time>
+          ${item.body ? `<p>${renderDescription(item.body)}</p>` : ''}
+        </article>
+      `).join('')}
+    </section>
+  `;
 }
 
 async function loadSession() {
@@ -237,19 +324,36 @@ function renderChallenges() {
   const challenges = filteredChallenges();
 
   view.innerHTML = `
+    ${announcementStrip()}
     <section class="toolbar">
       <input id="challenge-search" class="search-input" value="${escapeHtml(state.query)}" placeholder="search challenges...">
       <div class="category-pills">
         ${categories.map((cat) => `<button class="cat-pill${state.selectedCategory === cat ? ' active' : ''}" data-cat="${escapeHtml(cat)}">${escapeHtml(cat)}</button>`).join('')}
       </div>
+      <label class="toggle-row">
+        <span>Show solved</span>
+        <span class="toggle-switch">
+          <input type="checkbox" id="show-solved" ${state.showSolved ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
     </section>
     <section class="challenge-grid">
       ${challenges.map(challengeCard).join('') || emptyState('No visible challenges.')}
     </section>
   `;
+  applyCategoryColors(view);
 
-  document.getElementById('challenge-search').addEventListener('input', (e) => {
+  const search = document.getElementById('challenge-search');
+  search.addEventListener('input', (e) => {
     state.query = e.target.value;
+    renderChallenges();
+    const again = document.getElementById('challenge-search');
+    again.focus();
+    again.setSelectionRange(again.value.length, again.value.length);
+  });
+  document.getElementById('show-solved').addEventListener('change', (e) => {
+    state.showSolved = e.target.checked;
     renderChallenges();
   });
   document.querySelectorAll('.cat-pill').forEach((btn) => {
@@ -259,14 +363,26 @@ function renderChallenges() {
     });
   });
   document.querySelectorAll('[data-challenge-id]').forEach((card) => {
-    card.addEventListener('click', () => openChallenge(Number(card.dataset.challengeId)));
+    card.addEventListener('click', () => {
+      const challenge = state.challenges.find((c) => c.id === Number(card.dataset.challengeId));
+      if (challenge?.locked) {
+        toast(`locked: solve ${prerequisiteTitle(challenge)} first`, 'error');
+        return;
+      }
+      openChallenge(Number(card.dataset.challengeId));
+    });
   });
+}
+
+function prerequisiteTitle(challenge) {
+  const required = state.challenges.find((c) => c.id === challenge.unlock_requires);
+  return required ? `"${required.title}"` : 'another challenge';
 }
 
 function filteredChallenges() {
   const query = state.query.trim().toLowerCase();
   return state.challenges.filter((challenge) => {
-    if (challenge.solved_by_team) return false;
+    if (challenge.solved_by_team && !state.showSolved) return false;
     const categoryMatch = state.selectedCategory === 'all' || challenge.category === state.selectedCategory;
     const queryMatch = !query || challenge.title.toLowerCase().includes(query);
     return categoryMatch && queryMatch;
@@ -276,15 +392,20 @@ function filteredChallenges() {
 function challengeCard(challenge) {
   const difficulty = difficultyFor(challenge.points);
   return `
-    <article class="card challenge-card" data-challenge-id="${challenge.id}">
+    <article class="card challenge-card${challenge.solved_by_team ? ' is-solved' : ''}${challenge.locked ? ' is-locked' : ''}" data-challenge-id="${challenge.id}">
       <div class="card-top">
-        <span class="category" style="--category-color:${categoryColor(challenge.category)}">${escapeHtml(challenge.category)}</span>
-        ${challenge.solved_by_team ? '<span class="solved-flag">✓</span>' : ''}
+        <span class="category" data-category-color="${categoryColor(challenge.category)}">${escapeHtml(challenge.category)}</span>
+        ${challenge.solved_by_team ? '<span class="solved-flag">✓ solved</span>' : ''}
+        ${challenge.locked ? `<span class="locked-flag" title="Solve ${escapeHtml(prerequisiteTitle(challenge))} first">🔒 locked</span>` : ''}
       </div>
       <h2 class="card-title">${escapeHtml(challenge.title)}</h2>
       <div class="card-bottom">
         <strong class="card-pts">${challenge.points} <span class="pts-label muted">pts</span></strong>
-        <span class="card-meta"><i class="dot ${difficulty}"></i>${difficulty} · ${challenge.solve_count} solves</span>
+        <span class="card-meta">
+          ${challenge.hint_count ? `<span title="${challenge.hint_count} hint(s)">💡${challenge.hint_count}</span>` : ''}
+          ${challenge.file_count ? `<span title="${challenge.file_count} attachment(s)">📎${challenge.file_count}</span>` : ''}
+          <i class="dot ${difficulty}"></i>${difficulty} · ${challenge.solve_count} solves
+        </span>
       </div>
     </article>
   `;
@@ -300,19 +421,21 @@ async function openChallenge(id) {
         <button class="modal-close" type="button" aria-label="Close">x</button>
         <h2>${escapeHtml(challenge.title)}</h2>
         <div class="meta">
-          <span class="category" style="--category-color:${categoryColor(challenge.category)}">${escapeHtml(challenge.category)}</span>
+          <span class="category" data-category-color="${categoryColor(challenge.category)}">${escapeHtml(challenge.category)}</span>
           <span>${challenge.points} pts</span>
           <span>${challenge.solve_count} solves</span>
+          ${challenge.solved_by_team ? '<span class="solved">✓ solved</span>' : ''}
         </div>
         <p class="description">${renderDescription(challenge.description)}</p>
-        ${detail.files?.length ? `<div class="file-list">${detail.files.map(fileLink).join('')}</div>` : ''}
-        ${detail.hints?.length ? `<div class="hint-list">${detail.hints.map((hint) => hintRow(challenge.id, hint)).join('')}</div>` : ''}
+        ${detail.files?.length ? `<h3 class="section-label">Attachments</h3><div class="file-list">${detail.files.map(fileLink).join('')}</div>` : ''}
+        ${detail.hints?.length ? `<h3 class="section-label">Hints</h3><div class="hint-list">${detail.hints.map((hint, index) => hintRow(challenge, hint, index)).join('')}</div>` : ''}
         <form id="flag-form" class="flag-form">
           <input id="flag-input" placeholder="FLAG{...}" autocomplete="off" required>
           <button type="submit">Submit Flag</button>
         </form>
       </div>
     `;
+    applyCategoryColors(modal);
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
     modal.querySelector('.modal-close').addEventListener('click', closeModal);
@@ -320,46 +443,97 @@ async function openChallenge(id) {
       if (event.target === modal) closeModal();
     }, { once: true });
     modal.querySelector('#flag-form').addEventListener('submit', (event) => submitFlag(event, challenge.id));
-    modal.querySelectorAll('[data-hint-id]').forEach((button) => {
-      button.addEventListener('click', () => unlockHint(challenge.id, Number(button.dataset.hintId)));
+    modal.querySelectorAll('button[data-hint-id]').forEach((button) => {
+      button.addEventListener('click', () => unlockHint(challenge, button));
     });
   } catch (error) {
     toast(error.message, 'error');
   }
 }
 
+function isAbsoluteUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.host);
+  } catch (_) {
+    return false;
+  }
+}
+
+// Attachments are external links; FeralCTF does not host files.
 function fileLink(file) {
+  const size = file.size_bytes ? `<small>${formatBytes(file.size_bytes)}</small>` : '';
+  if (!isAbsoluteUrl(file.storage_path)) {
+    return `
+      <div class="file-link unavailable">
+        <span>${escapeHtml(file.filename)}</span>
+        <small>link unavailable</small>
+      </div>
+    `;
+  }
   return `
-    <a class="file-link" href="${appPath(`/${encodeURI(file.storage_path)}`)}" download>
-      <span>${escapeHtml(file.filename)}</span>
-      <small>${formatBytes(file.size_bytes)}</small>
+    <a class="file-link" href="${escapeHtml(file.storage_path)}" target="_blank" rel="noopener noreferrer">
+      <span>${escapeHtml(file.filename)} ↗</span>
+      ${size}
     </a>
   `;
 }
 
-function hintRow(challengeId, hint) {
+function hintLabel(hint, index) {
+  const cost = hint.cost_points ? `${hint.cost_points} pts` : 'free';
+  return `Hint ${index + 1} (${cost})`;
+}
+
+function hintRow(challenge, hint, index) {
   if (hint.unlocked) {
     return `
-      <details class="hint" open>
-        <summary>Hint ${hint.sort_order} (${hint.cost_points} pts)</summary>
-        <p>${escapeHtml(hint.content || '')}</p>
+      <details class="hint" open data-hint-id="${hint.id}">
+        <summary>${hintLabel(hint, index)}</summary>
+        <p>${renderDescription(hint.content || '')}</p>
       </details>
     `;
   }
+  let action;
+  if (challenge.solved_by_team) {
+    action = '<small class="muted">solved — not needed</small>';
+  } else if (!state.user?.team_id) {
+    action = '<button type="button" disabled title="Hints are unlocked per team">Join a team to unlock</button>';
+  } else {
+    action = `<button type="button" data-hint-id="${hint.id}" data-hint-index="${index}" data-hint-cost="${hint.cost_points}">Unlock</button>`;
+  }
   return `
-    <div class="hint locked">
-      <span>Hint ${hint.sort_order} (${hint.cost_points} pts)</span>
-      <button type="button" data-hint-id="${hint.id}" data-challenge-id="${challengeId}">Unlock</button>
+    <div class="hint locked" data-hint-id="${hint.id}">
+      <span>${hintLabel(hint, index)}</span>
+      ${action}
     </div>
   `;
 }
 
-async function unlockHint(challengeId, hintId) {
+async function unlockHint(challenge, button) {
+  const hintId = Number(button.dataset.hintId);
+  const index = Number(button.dataset.hintIndex);
+  const cost = Number(button.dataset.hintCost);
+  if (cost > 0) {
+    const team = state.scoreboard.teams.find((t) => t.team_id === state.user?.team_id);
+    const score = team ? team.score : 0;
+    if (!window.confirm(`Unlock Hint ${index + 1} for ${cost} pts? Team score: ${score}`)) return;
+  }
+  button.disabled = true;
   try {
-    const result = await api(`/api/challenges/${challengeId}/hints/${hintId}/unlock`, { method: 'POST' });
-    toast(`hint unlocked, -${result.points_deducted} pts`);
-    openChallenge(challengeId);
+    const result = await api(`/api/challenges/${challenge.id}/hints/${hintId}/unlock`, { method: 'POST' });
+    // Replace just this row so a flag being typed is not lost.
+    const row = button.closest('.hint');
+    row.outerHTML = hintRow(challenge, {
+      id: hintId,
+      cost_points: cost,
+      unlocked: true,
+      content: result.content,
+    }, index);
+    toast(result.points_deducted ? `hint unlocked, -${result.points_deducted} pts` : 'hint unlocked');
+    state.profile = null;
+    await loadScoreboard();
   } catch (error) {
+    button.disabled = false;
     toast(error.message, 'error');
   }
 }
@@ -377,6 +551,7 @@ async function submitFlag(event, challengeId) {
       return;
     }
     toast(`correct, +${result.points_earned} pts`);
+    state.profile = null;
     closeModal();
     await Promise.all([loadChallenges(), loadScoreboard()]);
     renderCurrent();
@@ -421,6 +596,7 @@ function renderScoreboard() {
         <h2>Live Scoreboard</h2>
         <span class="live-dot">● live</span>
       </div>
+      <div id="score-graph" class="score-graph"></div>
       <table class="scoreboard">
         <thead><tr><th>#</th><th>Team</th><th>Solves</th><th>Progress</th><th>Score</th></tr></thead>
         <tbody>${state.scoreboard.teams.map((team) => scoreRow(team, totalVisiblePoints)).join('') || '<tr><td colspan="5">No teams yet.</td></tr>'}</tbody>
@@ -428,6 +604,63 @@ function renderScoreboard() {
     </section>
   `;
   applyProgressWidths(view);
+  renderScoreGraph();
+}
+
+async function renderScoreGraph() {
+  const container = document.getElementById('score-graph');
+  if (!container) return;
+  let series;
+  try {
+    series = (await api('/api/scoreboard/graph')) || [];
+  } catch (_) {
+    return;
+  }
+  const top = state.scoreboard.teams.slice(0, 10).map((team) => team.team_id);
+  series = series.filter((s) => top.includes(s.team_id) && s.points.length);
+  if (!series.length || !document.body.contains(container)) return;
+
+  const width = 800;
+  const height = 220;
+  const pad = 30;
+  const times = series.flatMap((s) => s.points.map(([t]) => t));
+  const minT = Math.min(...times);
+  const maxT = Math.max(Math.max(...times), Math.floor(Date.now() / 1000));
+  const maxScore = Math.max(1, ...series.flatMap((s) => s.points.map(([, score]) => score)));
+  const x = (t) => pad + ((t - minT) / Math.max(1, maxT - minT)) * (width - pad * 2);
+  const y = (score) => height - pad - (Math.max(0, score) / maxScore) * (height - pad * 2);
+  const colors = ['#63d28c', '#60a5fa', '#f59e0b', '#f472b6', '#a78bfa', '#fb7185', '#34d399', '#fbbf24', '#38bdf8', '#e879f9'];
+
+  const lines = series.map((s, index) => {
+    const color = colors[top.indexOf(s.team_id) % colors.length] || colors[index % colors.length];
+    let d = '';
+    s.points.forEach(([t, score], i) => {
+      d += i === 0 ? `M${x(t).toFixed(1)},${y(score).toFixed(1)}` : `H${x(t).toFixed(1)}V${y(score).toFixed(1)}`;
+    });
+    const last = s.points[s.points.length - 1];
+    d += `H${x(maxT).toFixed(1)}`;
+    return {
+      color,
+      name: s.team_name,
+      svg: `<path d="${d}" fill="none" stroke="${color}" stroke-width="2"><title>${escapeHtml(s.team_name)}: ${last[1]}</title></path>`,
+    };
+  });
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Score over time for the top teams">
+      <line x1="${pad}" y1="${height - pad}" x2="${width - pad}" y2="${height - pad}" stroke="#2a3347"></line>
+      <line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height - pad}" stroke="#2a3347"></line>
+      <text x="${pad - 4}" y="${pad + 4}" text-anchor="end" fill="#8b949e" font-size="10">${maxScore}</text>
+      <text x="${pad - 4}" y="${height - pad}" text-anchor="end" fill="#8b949e" font-size="10">0</text>
+      ${lines.map((line) => line.svg).join('')}
+    </svg>
+    <div class="graph-legend">
+      ${lines.map((line) => `<span><i class="legend-swatch" data-swatch="${line.color}"></i>${escapeHtml(line.name)}</span>`).join('')}
+    </div>
+  `;
+  container.querySelectorAll('[data-swatch]').forEach((el) => {
+    el.style.background = el.dataset.swatch;
+  });
 }
 
 function scoreRow(team, totalVisiblePoints) {
@@ -446,6 +679,13 @@ function scoreRow(team, totalVisiblePoints) {
       <td>${team.score}</td>
     </tr>
   `;
+}
+
+// Inline style attributes are blocked by the CSP, so colours are applied here.
+function applyCategoryColors(root) {
+  root.querySelectorAll('[data-category-color]').forEach((el) => {
+    el.style.setProperty('--category-color', el.dataset.categoryColor);
+  });
 }
 
 function applyProgressWidths(root) {
@@ -469,6 +709,11 @@ async function renderProfile() {
   }
   const teamScore = state.scoreboard.teams.find((team) => team.team_id === state.user.team_id);
   const solves = state.profile ? state.profile.solve_history : [];
+  const hintUnlocks = state.profile?.hint_history || [];
+  const history = [
+    ...solves.map((solve) => ({ at: solve.solved_at, html: solveRow(solve) })),
+    ...hintUnlocks.map((unlock) => ({ at: unlock.unlocked_at, html: hintHistoryRow(unlock) })),
+  ].sort((a, b) => b.at - a.at);
   const inviteCode = state.profile?.team?.invite_code || '';
 
   view.innerHTML = `
@@ -482,8 +727,8 @@ async function renderProfile() {
         <div><strong>${teamScore ? teamScore.rank : '-'}</strong><span>rank</span></div>
         <div><strong>${teamScore ? teamScore.score : 0}</strong><span>score</span></div>
         <div><strong>${solves.length}</strong><span>solves</span></div>
-        <div><strong>0</strong><span>hints used</span></div>
-        <div><strong>0</strong><span>first bloods</span></div>
+        <div><strong>${state.profile?.hints_used ?? 0}</strong><span>hints used</span></div>
+        <div><strong>${state.profile?.first_bloods ?? 0}</strong><span>first bloods</span></div>
       </div>
     </section>
     ${!state.user.team_id ? `
@@ -523,7 +768,7 @@ async function renderProfile() {
     </section>
     <section class="panel">
       <h2>Solve History</h2>
-      <div class="history">${solves.map(solveRow).join('') || '<p class="muted">No solves yet.</p>'}</div>
+      <div class="history">${history.map((item) => item.html).join('') || '<p class="muted">No solves yet.</p>'}</div>
     </section>
   `;
 
@@ -597,6 +842,17 @@ async function joinTeam(event) {
   }
 }
 
+function hintHistoryRow(unlock) {
+  return `
+    <div class="history-row hint-history">
+      <span>hint</span>
+      <strong>${escapeHtml(unlock.challenge_title)}</strong>
+      <span>${unlock.points_deducted ? `−${unlock.points_deducted} pts` : 'free'}</span>
+      <time>${formatTime(unlock.unlocked_at)}</time>
+    </div>
+  `;
+}
+
 function solveRow(solve) {
   return `
     <div class="history-row">
@@ -613,7 +869,7 @@ async function renderAdmin(section = 'overview') {
   view.innerHTML = `
     <section class="admin">
       <aside>
-        ${['overview', 'challenges', 'users', 'teams', 'settings'].map((item) => `<button data-admin="${item}" class="${item === section ? 'active' : ''}">■ ${item}</button>`).join('')}
+        ${['overview', 'challenges', 'submissions', 'users', 'teams', 'settings'].map((item) => `<button data-admin="${item}" class="${item === section ? 'active' : ''}">■ ${item}</button>`).join('')}
       </aside>
       <div id="admin-content" class="panel"></div>
     </section>
@@ -622,6 +878,7 @@ async function renderAdmin(section = 'overview') {
     button.addEventListener('click', () => renderAdmin(button.dataset.admin));
   });
   if (section === 'challenges') renderAdminChallenges();
+  else if (section === 'submissions') renderAdminSubmissions();
   else if (section === 'users') renderAdminUsers();
   else if (section === 'teams') renderAdminTeams();
   else if (section === 'settings') renderAdminSettings();
@@ -652,15 +909,61 @@ function submissionRow(submission) {
   return `
     <div class="history-row">
       <span>#${submission.id}</span>
-      <strong>team ${submission.team_id}</strong>
-      <span>challenge ${submission.challenge_id}</span>
-      <span>${submission.is_correct ? 'correct' : 'wrong'}</span>
+      <strong>${escapeHtml(submission.team_name || `team ${submission.team_id}`)}</strong>
+      <span>${escapeHtml(submission.username || `user ${submission.user_id}`)}</span>
+      <span>${escapeHtml(submission.challenge_title || `challenge ${submission.challenge_id}`)}</span>
+      <span class="${submission.is_correct ? 'ok' : 'bad'}">${submission.is_correct ? 'correct' : 'wrong'}</span>
+      <time>${formatTime(submission.submitted_at)}</time>
     </div>
   `;
 }
 
+async function renderAdminSubmissions(filters = { page: 1 }) {
+  const content = document.getElementById('admin-content');
+  const params = new URLSearchParams({ page: filters.page || 1, per_page: 50 });
+  if (filters.team_id) params.set('team_id', filters.team_id);
+  if (filters.challenge_id) params.set('challenge_id', filters.challenge_id);
+  if (filters.correct) params.set('correct', filters.correct);
+  let result;
+  let teams;
+  let challenges;
+  try {
+    [result, teams, challenges] = await Promise.all([
+      api(`/api/admin/submissions?${params}`),
+      api('/api/admin/teams'),
+      api('/api/admin/challenges'),
+    ]);
+  } catch (error) {
+    content.innerHTML = emptyState(error.message);
+    return;
+  }
+  const pages = Math.max(1, Math.ceil(result.total / result.per_page));
+  const option = (value, label, selected) => `<option value="${value}" ${String(selected || '') === String(value) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  content.innerHTML = `
+    <h2>Submissions</h2>
+    <form id="submission-filters" class="filter-row">
+      <select name="team_id">${option('', 'all teams', filters.team_id)}${teams.map((t) => option(t.id, t.name, filters.team_id)).join('')}</select>
+      <select name="challenge_id">${option('', 'all challenges', filters.challenge_id)}${challenges.map((c) => option(c.id, c.title, filters.challenge_id)).join('')}</select>
+      <select name="correct">${option('', 'any result', filters.correct)}${option('true', 'correct', filters.correct)}${option('false', 'wrong', filters.correct)}</select>
+    </form>
+    <p class="muted">${result.total} submissions · page ${result.page} of ${pages}</p>
+    <div class="history">${result.submissions.map(submissionRow).join('') || '<p class="muted">No submissions.</p>'}</div>
+    <div class="pager">
+      <button type="button" data-page="${result.page - 1}" ${result.page <= 1 ? 'disabled' : ''}>← prev</button>
+      <button type="button" data-page="${result.page + 1}" ${result.page >= pages ? 'disabled' : ''}>next →</button>
+    </div>
+  `;
+  const form = document.getElementById('submission-filters');
+  const current = () => Object.fromEntries(new FormData(form).entries());
+  form.addEventListener('change', () => renderAdminSubmissions({ ...current(), page: 1 }));
+  content.querySelectorAll('[data-page]').forEach((button) => {
+    button.addEventListener('click', () => renderAdminSubmissions({ ...current(), page: Number(button.dataset.page) }));
+  });
+}
+
 async function renderAdminChallenges() {
   const content = document.getElementById('admin-content');
+  if (!content) return;
   let challenges;
   try {
     challenges = await api('/api/admin/challenges');
@@ -668,31 +971,27 @@ async function renderAdminChallenges() {
     content.innerHTML = emptyState(error.message);
     return;
   }
+  state.adminChallenges = challenges;
   content.innerHTML = `
     <h2>Challenges</h2>
-    <form id="challenge-form" class="admin-form">
-      <input name="title" placeholder="title" required>
-      <input name="category" placeholder="category" required>
-      <input name="points" type="number" placeholder="points" required>
-      <input name="flag" placeholder="flag" required>
-      <textarea name="description" placeholder="description" rows="6"></textarea>
-      <label class="toggle-row">
-        <span>Start visible</span>
-        <span class="toggle-switch">
-          <input type="checkbox" name="is_visible">
-          <span class="toggle-slider"></span>
-        </span>
-      </label>
-      <button type="submit">Add Challenge</button>
-    </form>
+    <details class="admin-create">
+      <summary>Add challenge</summary>
+      <form id="challenge-form" class="admin-form">
+        ${challengeFormFields(null, challenges)}
+        <button type="submit">Add Challenge</button>
+      </form>
+    </details>
     <table class="scoreboard">
-      <thead><tr><th>Title</th><th>Category</th><th>Points</th><th>Visible</th><th>Actions</th></tr></thead>
-      <tbody>${challenges.map(adminChallengeRow).join('') || '<tr><td colspan="5">No challenges.</td></tr>'}</tbody>
+      <thead><tr><th>Title</th><th>Category</th><th>Points</th><th>Hints</th><th>Attachments</th><th>Visible</th><th>Actions</th></tr></thead>
+      <tbody>${challenges.map(adminChallengeRow).join('') || '<tr><td colspan="7">No challenges.</td></tr>'}</tbody>
     </table>
   `;
-  document.getElementById('challenge-form').addEventListener('submit', createChallenge);
+  const form = document.getElementById('challenge-form');
+  wireChallengeForm(form);
+  form.addEventListener('submit', createChallenge);
   document.querySelectorAll('[data-delete-challenge]').forEach((button) => {
-    button.addEventListener('click', () => deleteChallenge(Number(button.dataset.deleteChallenge)));
+    const challenge = challenges.find((c) => c.id === Number(button.dataset.deleteChallenge));
+    button.addEventListener('click', () => deleteChallenge(challenge));
   });
   document.querySelectorAll('[data-toggle-hidden]').forEach((input) => {
     input.addEventListener('change', () => {
@@ -710,9 +1009,11 @@ function adminChallengeRow(challenge) {
   const visible = !challenge.is_hidden;
   return `
     <tr>
-      <td>${escapeHtml(challenge.title)}</td>
+      <td>${escapeHtml(challenge.title)}${challenge.unlock_requires ? ' <span class="muted" title="has a prerequisite">🔒</span>' : ''}</td>
       <td>${escapeHtml(challenge.category)}</td>
-      <td>${challenge.points}</td>
+      <td>${challenge.points}${challenge.flag_type === 'dynamic' ? ' <span class="muted">dyn</span>' : ''}</td>
+      <td>${challenge.hint_count}</td>
+      <td>${challenge.file_count}</td>
       <td>
         <label class="toggle-switch" title="${visible ? 'visible' : 'hidden'}">
           <input type="checkbox" data-toggle-hidden="${challenge.id}" ${visible ? 'checked' : ''}>
@@ -725,6 +1026,108 @@ function adminChallengeRow(challenge) {
       </td>
     </tr>
   `;
+}
+
+// Shared by the create form and the edit modal. `challenge` is null on create.
+function challengeFormFields(challenge, allChallenges) {
+  const c = challenge || {};
+  const flagType = c.flag_type || 'static';
+  const points = c.points ?? '';
+  const tags = (() => {
+    try {
+      return JSON.parse(c.tags || '[]').join(', ');
+    } catch (_) {
+      return '';
+    }
+  })();
+  const prerequisites = allChallenges.filter((other) => other.id !== c.id);
+  const flagHelp = challenge
+    ? `<small class="muted">type: ${escapeHtml(flagType)} · re-enter the flag when changing type or case sensitivity.</small>
+      <div class="reveal-row">
+        <button type="button" id="reveal-flag-btn">Reveal current flag</button>
+        <code id="revealed-flag" class="revealed-flag" hidden></code>
+      </div>`
+    : '';
+  return `
+    <label><span>Title</span><input name="title" value="${escapeHtml(c.title || '')}" required></label>
+    <label><span>Category</span><input name="category" value="${escapeHtml(c.category || '')}" required></label>
+    <label><span>Description</span><textarea name="description" rows="6">${escapeHtml(c.description || '')}</textarea></label>
+    <div class="form-grid">
+      <label><span>Flag type</span>
+        <select name="flag_type">
+          ${['static', 'regex', 'dynamic'].map((type) => `<option value="${type}" ${type === flagType ? 'selected' : ''}>${type}</option>`).join('')}
+        </select>
+      </label>
+      <label class="toggle-row">
+        <span>Case sensitive</span>
+        <span class="toggle-switch">
+          <input type="checkbox" name="flag_case_sensitive" ${c.flag_case_sensitive ? 'checked' : ''}>
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
+    </div>
+    <label>
+      <span>${challenge ? 'New flag (leave blank to keep current)' : 'Flag'}</span>
+      <input name="flag" placeholder="${flagType === 'regex' ? '^flag\\{[a-z]+\\}$' : 'flag{...}'}" autocomplete="off" ${challenge ? '' : 'required'}>
+      ${flagHelp}
+    </label>
+    <div class="form-grid">
+      <label><span>Points</span><input name="points" type="number" min="0" value="${points}" required></label>
+      <label data-dynamic-field><span>Max points</span><input name="max_points" type="number" min="0" value="${c.max_points ?? ''}"></label>
+      <label data-dynamic-field><span>Min points</span><input name="min_points" type="number" min="0" value="${c.min_points ?? ''}"></label>
+      <label data-dynamic-field><span>Decay rate</span><input name="decay_rate" type="number" min="0" value="${c.decay_rate ?? 10}"></label>
+    </div>
+    <div class="form-grid">
+      <label><span>Author</span><input name="author" value="${escapeHtml(c.author || '')}"></label>
+      <label><span>Tags (comma separated)</span><input name="tags" value="${escapeHtml(tags)}"></label>
+    </div>
+    <label><span>Prerequisite (must be solved first)</span>
+      <select name="unlock_requires">
+        <option value="">none</option>
+        ${prerequisites.map((other) => `<option value="${other.id}" ${other.id === c.unlock_requires ? 'selected' : ''}>${escapeHtml(other.title)}</option>`).join('')}
+      </select>
+    </label>
+    <label class="toggle-row">
+      <span>${challenge ? 'Visible' : 'Start visible'}</span>
+      <span class="toggle-switch">
+        <input type="checkbox" name="is_visible" ${challenge && !c.is_hidden ? 'checked' : ''}>
+        <span class="toggle-slider"></span>
+      </span>
+    </label>
+  `;
+}
+
+function wireChallengeForm(form) {
+  const select = form.querySelector('[name="flag_type"]');
+  const sync = () => {
+    form.querySelectorAll('[data-dynamic-field]').forEach((field) => {
+      field.hidden = select.value !== 'dynamic';
+    });
+  };
+  select.addEventListener('change', sync);
+  sync();
+}
+
+function challengeBody(form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  const points = Number(data.points);
+  const dynamic = data.flag_type === 'dynamic';
+  return {
+    title: data.title.trim(),
+    category: data.category.trim(),
+    description: data.description || '',
+    flag: data.flag.trim(),
+    flag_type: data.flag_type,
+    flag_case_sensitive: 'flag_case_sensitive' in data,
+    points,
+    max_points: dynamic && data.max_points !== '' ? Number(data.max_points) : points,
+    min_points: dynamic && data.min_points !== '' ? Number(data.min_points) : Math.max(1, Math.floor(points / 5)),
+    decay_rate: data.decay_rate !== '' ? Number(data.decay_rate) : 10,
+    author: data.author.trim() || null,
+    tags: data.tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+    unlock_requires: data.unlock_requires ? Number(data.unlock_requires) : null,
+    is_hidden: !('is_visible' in data),
+  };
 }
 
 async function toggleChallengeVisibility(id, isHidden) {
@@ -742,39 +1145,27 @@ async function toggleChallengeVisibility(id, isHidden) {
 
 async function createChallenge(event) {
   event.preventDefault();
-  const data = Object.fromEntries(new FormData(event.target).entries());
   try {
     await api('/api/admin/challenges', {
       method: 'POST',
-      body: JSON.stringify({
-        title: data.title,
-        category: data.category,
-        description: data.description || '',
-        flag: data.flag,
-        flag_type: 'static',
-        flag_case_sensitive: false,
-        points: Number(data.points),
-        max_points: Number(data.points),
-        min_points: Math.max(1, Math.floor(Number(data.points) / 5)),
-        decay_rate: 10,
-        author: null,
-        tags: [],
-        unlock_requires: null,
-        is_hidden: !('is_visible' in data),
-      }),
+      body: JSON.stringify(challengeBody(event.target)),
     });
     await loadChallenges();
     renderAdmin('challenges');
+    toast('challenge added');
   } catch (error) {
     toast(error.message, 'error');
   }
 }
 
-async function deleteChallenge(id) {
+async function deleteChallenge(challenge) {
+  if (!challenge) return;
+  if (!window.confirm(`Delete "${challenge.title}"? Its solves, hints and attachments are removed and team scores recalculated.`)) return;
   try {
-    await api(`/api/admin/challenges/${id}`, { method: 'DELETE' });
+    await api(`/api/admin/challenges/${challenge.id}`, { method: 'DELETE' });
     await loadChallenges();
     renderAdmin('challenges');
+    toast('challenge deleted');
   } catch (error) {
     toast(error.message, 'error');
   }
@@ -788,33 +1179,17 @@ function openEditChallengeModal(challenge) {
       <button class="modal-close" type="button" aria-label="Close">x</button>
       <h2>Edit Challenge</h2>
       <form id="edit-challenge-form" class="admin-form">
-        <label><span>Title</span>
-          <input name="title" value="${escapeHtml(challenge.title)}" required>
-        </label>
-        <label><span>Category</span>
-          <input name="category" value="${escapeHtml(challenge.category)}" required>
-        </label>
-        <label><span>Points</span>
-          <input name="points" type="number" value="${challenge.points}" required>
-        </label>
-        <label>
-          <span>New flag (leave blank to keep current)</span>
-          <input name="flag" placeholder="flag{...}" autocomplete="off"
-            title="${challenge.flag_type === 'regex' ? 'Pattern: ' : 'Hash: '}${escapeHtml(challenge.flag_hash)}">
-          <small class="muted">type: ${escapeHtml(challenge.flag_type)} · hover input to see stored value</small>
-        </label>
-        <label><span>Description</span>
-          <textarea name="description" rows="6">${escapeHtml(challenge.description)}</textarea>
-        </label>
-        <label class="toggle-row">
-          <span>Visible</span>
-          <span class="toggle-switch">
-            <input type="checkbox" name="is_visible" ${!challenge.is_hidden ? 'checked' : ''}>
-            <span class="toggle-slider"></span>
-          </span>
-        </label>
+        ${challengeFormFields(challenge, state.adminChallenges || [])}
         <button type="submit">Save</button>
       </form>
+      <section class="editor-section">
+        <h3 class="section-label">Hints</h3>
+        <div id="hint-editor"><p class="muted">loading…</p></div>
+      </section>
+      <section class="editor-section">
+        <h3 class="section-label">Attachments (absolute URLs)</h3>
+        <div id="file-editor"><p class="muted">loading…</p></div>
+      </section>
     </div>
   `;
   modal.classList.add('open');
@@ -823,32 +1198,247 @@ function openEditChallengeModal(challenge) {
   modal.addEventListener('click', (event) => {
     if (event.target === modal) closeModal();
   }, { once: true });
-  modal.querySelector('#edit-challenge-form').addEventListener('submit', (event) =>
-    updateChallenge(event, challenge.id),
-  );
+  const form = modal.querySelector('#edit-challenge-form');
+  wireChallengeForm(form);
+  form.addEventListener('submit', (event) => updateChallenge(event, challenge));
+  modal.querySelector('#reveal-flag-btn').addEventListener('click', () => revealFlag(challenge.id));
+  renderHintEditor(challenge.id);
+  renderFileEditor(challenge.id);
 }
 
-async function updateChallenge(event, id) {
+async function updateChallenge(event, challenge) {
   event.preventDefault();
-  const data = Object.fromEntries(new FormData(event.target).entries());
-  const body = {
-    title: data.title,
-    category: data.category,
-    points: Number(data.points),
-    description: data.description || '',
-    is_hidden: !('is_visible' in data),
-  };
-  if (data.flag.trim()) body.flag = data.flag.trim();
+  const body = challengeBody(event.target);
+  if (!body.flag) delete body.flag;
   try {
-    await api(`/api/admin/challenges/${id}`, {
+    await api(`/api/admin/challenges/${challenge.id}`, {
       method: 'PUT',
       body: JSON.stringify(body),
     });
     closeModal();
+    await loadChallenges();
     renderAdminChallenges();
+    toast('challenge saved');
   } catch (error) {
     toast(error.message, 'error');
   }
+}
+
+// Decrypts the stored copy for verification (audited). Players' submissions
+// are always checked against the hash, never against this value.
+async function revealFlag(challengeId) {
+  const output = document.getElementById('revealed-flag');
+  try {
+    const result = await api(`/api/admin/challenges/${challengeId}/flag`);
+    if (result.error) {
+      output.textContent = result.error;
+    } else if (result.stored) {
+      output.textContent = `${result.flag_type === 'regex' ? 'pattern: ' : ''}${result.flag}`;
+    } else {
+      output.textContent = 'not stored — re-enter the flag to enable reveal';
+    }
+    output.classList.toggle('muted', !result.flag);
+    output.hidden = false;
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+// ---- admin hint editor ----
+
+async function renderHintEditor(challengeId) {
+  const container = document.getElementById('hint-editor');
+  if (!container) return;
+  let hints;
+  try {
+    hints = await api(`/api/admin/challenges/${challengeId}/hints`);
+  } catch (error) {
+    container.innerHTML = emptyState(error.message);
+    return;
+  }
+  container.innerHTML = `
+    ${hints.map((hint, index) => `
+      <div class="editor-row" data-hint-row="${hint.id}">
+        <textarea name="content" rows="3" maxlength="4000">${escapeHtml(hint.content)}</textarea>
+        <div class="editor-controls">
+          <label><span>Cost</span><input name="cost_points" type="number" min="0" value="${hint.cost_points}"></label>
+          <span class="muted">#${index + 1} · unlocked by ${hint.unlock_count} team${hint.unlock_count === 1 ? '' : 's'}</span>
+          <button type="button" data-hint-move="-1" ${index === 0 ? 'disabled' : ''} title="Move up">↑</button>
+          <button type="button" data-hint-move="1" ${index === hints.length - 1 ? 'disabled' : ''} title="Move down">↓</button>
+          <button type="button" data-hint-save>Save</button>
+          <button type="button" data-hint-delete>Delete</button>
+        </div>
+      </div>
+    `).join('') || '<p class="muted">No hints yet.</p>'}
+    <form id="add-hint-form" class="editor-row">
+      <textarea name="content" rows="3" maxlength="4000" placeholder="new hint text" required></textarea>
+      <div class="editor-controls">
+        <label><span>Cost</span><input name="cost_points" type="number" min="0" value="0" required></label>
+        <button type="submit">Add hint</button>
+      </div>
+    </form>
+  `;
+
+  const reload = () => {
+    renderHintEditor(challengeId);
+    loadChallenges();
+    renderAdminChallenges();
+  };
+  container.querySelectorAll('[data-hint-row]').forEach((row) => {
+    const hint = hints.find((h) => h.id === Number(row.dataset.hintRow));
+    row.querySelector('[data-hint-save]').addEventListener('click', async () => {
+      const cost = Number(row.querySelector('[name="cost_points"]').value);
+      if (hint.unlock_count > 0 && cost !== hint.cost_points
+        && !window.confirm('Existing unlocks keep their original deduction. Change the cost for future unlocks?')) return;
+      try {
+        await api(`/api/admin/hints/${hint.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ content: row.querySelector('[name="content"]').value, cost_points: cost }),
+        });
+        toast('hint saved');
+        reload();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    });
+    row.querySelector('[data-hint-delete]').addEventListener('click', async () => {
+      const message = hint.unlock_count > 0
+        ? `${hint.unlock_count} team${hint.unlock_count === 1 ? '' : 's'} will be refunded what they paid (currently ${hint.cost_points} pts). Delete?`
+        : 'Delete this hint?';
+      if (!window.confirm(message)) return;
+      try {
+        await api(`/api/admin/hints/${hint.id}`, { method: 'DELETE' });
+        toast('hint deleted');
+        await loadScoreboard();
+        reload();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    });
+    row.querySelectorAll('[data-hint-move]').forEach((button) => {
+      button.addEventListener('click', () => moveHint(hints, hint, Number(button.dataset.hintMove), reload));
+    });
+  });
+  container.querySelector('#add-hint-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    try {
+      await api(`/api/admin/challenges/${challengeId}/hints`, {
+        method: 'POST',
+        body: JSON.stringify({ content: data.content, cost_points: Number(data.cost_points) }),
+      });
+      toast('hint added');
+      reload();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+}
+
+// Reorder by rewriting sort_order as positions 1..n for the hints that move.
+async function moveHint(hints, hint, delta, reload) {
+  const order = [...hints];
+  const from = order.indexOf(hint);
+  const to = from + delta;
+  if (to < 0 || to >= order.length) return;
+  [order[from], order[to]] = [order[to], order[from]];
+  try {
+    for (const [index, item] of order.entries()) {
+      if (item.sort_order !== index + 1) {
+        await api(`/api/admin/hints/${item.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ sort_order: index + 1 }),
+        });
+      }
+    }
+    reload();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+// ---- admin attachment editor ----
+
+async function renderFileEditor(challengeId) {
+  const container = document.getElementById('file-editor');
+  if (!container) return;
+  let files;
+  try {
+    files = await api(`/api/admin/challenges/${challengeId}/files`);
+  } catch (error) {
+    container.innerHTML = emptyState(error.message);
+    return;
+  }
+  container.innerHTML = `
+    ${files.map((file) => {
+      const valid = isAbsoluteUrl(file.storage_path);
+      return `
+        <div class="editor-row attachment-row${valid ? '' : ' needs-fix'}" data-file-row="${file.id}">
+          <div class="editor-controls">
+            <label><span>Label</span><input name="label" value="${escapeHtml(file.filename)}"></label>
+            <label class="grow"><span>URL${valid ? '' : ' — needs absolute URL'}</span><input name="url" type="url" value="${escapeHtml(file.storage_path)}" placeholder="https://..."></label>
+            ${valid ? `<a href="${escapeHtml(file.storage_path)}" target="_blank" rel="noopener noreferrer">open ↗</a>` : ''}
+            <button type="button" data-file-save>Save</button>
+            <button type="button" data-file-delete>Delete</button>
+          </div>
+        </div>
+      `;
+    }).join('') || '<p class="muted">No attachments yet.</p>'}
+    <form id="add-file-form" class="editor-row">
+      <div class="editor-controls">
+        <label><span>Label</span><input name="label" placeholder="capture.pcap" required></label>
+        <label class="grow"><span>URL</span><input name="url" type="url" placeholder="https://files.example.com/capture.pcap" required></label>
+        <button type="submit">Add attachment</button>
+      </div>
+    </form>
+  `;
+  const reload = () => {
+    renderFileEditor(challengeId);
+    loadChallenges();
+    renderAdminChallenges();
+  };
+  container.querySelectorAll('[data-file-row]').forEach((row) => {
+    const id = Number(row.dataset.fileRow);
+    row.querySelector('[data-file-save]').addEventListener('click', async () => {
+      try {
+        await api(`/api/admin/files/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            label: row.querySelector('[name="label"]').value,
+            url: row.querySelector('[name="url"]').value,
+          }),
+        });
+        toast('attachment saved');
+        reload();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    });
+    row.querySelector('[data-file-delete]').addEventListener('click', async () => {
+      if (!window.confirm('Delete this attachment link?')) return;
+      try {
+        await api(`/api/admin/files/${id}`, { method: 'DELETE' });
+        toast('attachment deleted');
+        reload();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    });
+  });
+  container.querySelector('#add-file-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    try {
+      await api(`/api/admin/challenges/${challengeId}/files`, {
+        method: 'POST',
+        body: JSON.stringify({ label: data.label, url: data.url }),
+      });
+      toast('attachment added');
+      reload();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
 }
 
 async function renderAdminUsers() {
@@ -856,12 +1446,20 @@ async function renderAdminUsers() {
   try {
     const users = await api('/api/admin/users');
     content.innerHTML = `
-      <h2>Users</h2>
+      <div class="section-head">
+        <h2>Users</h2>
+        <button type="button" id="new-user-btn">New user</button>
+      </div>
       <table class="scoreboard">
         <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Team</th><th>Admin</th><th>Ban</th><th>Actions</th></tr></thead>
         <tbody>${users.map(adminUserRow).join('') || '<tr><td colspan="7">No users.</td></tr>'}</tbody>
       </table>
     `;
+    document.getElementById('new-user-btn').addEventListener('click', openNewUserModal);
+    document.querySelectorAll('[data-user-team]').forEach((button) => {
+      const user = users.find((item) => item.id === Number(button.dataset.userTeam));
+      button.addEventListener('click', () => openUserTeamModal(user));
+    });
     document.querySelectorAll('[data-user-admin]').forEach((input) => {
       input.addEventListener('change', () => {
         updateUserRole(Number(input.dataset.userAdmin), input.checked ? 'admin' : 'player');
@@ -889,10 +1487,13 @@ function adminUserRow(user) {
       <td>${user.id}</td>
       <td>${escapeHtml(user.username)}</td>
       <td>${escapeHtml(role)}</td>
-      <td>${user.team_id || '-'}</td>
+      <td>${user.team_name ? escapeHtml(user.team_name) : '<span class="muted">-</span>'}</td>
       <td>${toggleCell('Admin', `data-user-admin="${user.id}"`, role === 'admin')}</td>
       <td>${toggleCell('Ban', `data-user-ban="${user.id}"`, role === 'banned')}</td>
-      <td><button type="button" data-user-password="${user.id}">Password</button></td>
+      <td>
+        <button type="button" data-user-team="${user.id}">Team</button>
+        <button type="button" data-user-password="${user.id}">Password</button>
+      </td>
     </tr>
   `;
 }
@@ -909,6 +1510,154 @@ async function updateUserRole(id, role) {
     toast(error.message, 'error');
     renderAdminUsers();
   }
+}
+
+// Team picker shared by "New user" and "Team" (reassign). Returns markup.
+function teamPickerFields(teams, currentTeamId) {
+  return `
+    <fieldset class="team-picker">
+      <legend>Team</legend>
+      <label class="radio-row"><input type="radio" name="team_mode" value="none" ${currentTeamId ? '' : 'checked'}> No team</label>
+      <label class="radio-row"><input type="radio" name="team_mode" value="existing" ${currentTeamId ? 'checked' : ''} ${teams.length ? '' : 'disabled'}> Existing team</label>
+      <select name="existing_id" ${teams.length ? '' : 'disabled'}>
+        ${teams.map((team) => `<option value="${team.id}" ${team.id === currentTeamId ? 'selected' : ''}>${escapeHtml(team.name)}</option>`).join('')}
+      </select>
+      <label class="radio-row"><input type="radio" name="team_mode" value="new"> New team</label>
+      <input name="new_name" placeholder="new team name">
+    </fieldset>
+  `;
+}
+
+function wireTeamPicker(form) {
+  const sync = () => {
+    const mode = form.querySelector('[name="team_mode"]:checked')?.value;
+    form.querySelector('[name="existing_id"]').disabled = mode !== 'existing';
+    form.querySelector('[name="new_name"]').disabled = mode !== 'new';
+    if (mode === 'new') form.querySelector('[name="new_name"]').focus();
+  };
+  form.querySelectorAll('[name="team_mode"]').forEach((radio) => radio.addEventListener('change', sync));
+  form.querySelector('[name="existing_id"]').addEventListener('focus', () => {
+    form.querySelector('[name="team_mode"][value="existing"]').checked = true;
+  });
+  sync();
+}
+
+function teamAssignment(data) {
+  if (data.team_mode === 'existing') return { existing_id: Number(data.existing_id) };
+  if (data.team_mode === 'new') {
+    if (!data.new_name?.trim()) throw new Error('enter a team name');
+    return { new_name: data.new_name.trim() };
+  }
+  return null;
+}
+
+function openModalPanel(html) {
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `<div class="modal-panel"><button class="modal-close" type="button" aria-label="Close">x</button>${html}</div>`;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+  modal.querySelector('.modal-close').addEventListener('click', closeModal);
+  modal.addEventListener('click', (event) => {
+    if (event.target === modal) closeModal();
+  }, { once: true });
+  return modal;
+}
+
+async function openNewUserModal() {
+  let teams;
+  try {
+    teams = await api('/api/admin/teams');
+  } catch (error) {
+    toast(error.message, 'error');
+    return;
+  }
+  const modal = openModalPanel(`
+    <h2>New User</h2>
+    <p class="muted">Create an account and hand out the credentials. Works even when registration is closed.</p>
+    <form id="new-user-form" class="admin-form">
+      <input name="username" autocomplete="off" placeholder="username (3–32: letters, digits, _ -)" required>
+      <input name="password" type="password" autocomplete="new-password" placeholder="password (min 8 chars)" required>
+      <input name="password_confirm" type="password" autocomplete="new-password" placeholder="confirm password" required>
+      <label class="toggle-row">
+        <span>Admin</span>
+        <span class="toggle-switch">
+          <input type="checkbox" name="is_admin">
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
+      ${teamPickerFields(teams, null)}
+      <button type="submit">Create User</button>
+    </form>
+  `);
+  const form = modal.querySelector('#new-user-form');
+  wireTeamPicker(form);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form).entries());
+    if (data.password !== data.password_confirm) {
+      toast('passwords do not match', 'error');
+      return;
+    }
+    try {
+      const user = await api('/api/admin/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: data.username.trim(),
+          password: data.password,
+          password_confirm: data.password_confirm,
+          role: 'is_admin' in data ? 'admin' : 'player',
+          team: teamAssignment(data),
+        }),
+      });
+      closeModal();
+      toast(`created ${user.username}${user.team_name ? ` on ${user.team_name}` : ''}`);
+      await loadScoreboard();
+      renderAdminUsers();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+}
+
+async function openUserTeamModal(user) {
+  if (!user) return;
+  let teams;
+  try {
+    teams = await api('/api/admin/teams');
+  } catch (error) {
+    toast(error.message, 'error');
+    return;
+  }
+  const modal = openModalPanel(`
+    <h2>Assign Team</h2>
+    <p class="muted">${escapeHtml(user.username)} · currently ${user.team_name ? escapeHtml(user.team_name) : 'no team'}. Past solves stay with the team that earned them; the user is logged out.</p>
+    <form id="user-team-form" class="admin-form">
+      ${teamPickerFields(teams, user.team_id)}
+      <button type="submit">Save</button>
+    </form>
+  `);
+  const form = modal.querySelector('#user-team-form');
+  wireTeamPicker(form);
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(form).entries());
+    try {
+      const updated = await api(`/api/admin/users/${user.id}/team`, {
+        method: 'PUT',
+        body: JSON.stringify({ team: teamAssignment(data) }),
+      });
+      closeModal();
+      if (state.user && state.user.id === user.id) {
+        clearLocalSession('team changed; please log in again');
+        return;
+      }
+      toast(`${updated.username}: ${updated.team_name || 'no team'}`);
+      await loadScoreboard();
+      renderAdminUsers();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
 }
 
 function openAdminPasswordModal(user) {
@@ -1024,19 +1773,208 @@ function toggleCell(label, dataAttribute, checked) {
   `;
 }
 
-function renderAdminSettings() {
-  document.getElementById('admin-content').innerHTML = `
+async function renderAdminSettings() {
+  const content = document.getElementById('admin-content');
+  let settings;
+  try {
+    [settings] = await Promise.all([api('/api/admin/settings'), loadCompetition()]);
+  } catch (error) {
+    content.innerHTML = emptyState(error.message);
+    return;
+  }
+  const c = settings.competition;
+  const status = state.competition || {};
+  const now = Date.now() / 1000;
+  const statusText = !status.started ? 'not started' : status.ended ? 'ended' : status.frozen_at && status.frozen_at <= now ? 'running (scoreboard frozen)' : 'running';
+  const row = (label, value) => `<tr><th>${label}</th><td>${escapeHtml(String(value ?? '-'))}</td></tr>`;
+  const branding = settings.branding || {};
+  content.innerHTML = `
     <h2>Settings</h2>
-    <form class="admin-form">
-      <input placeholder="Competition name">
-      <input type="datetime-local">
-      <input type="datetime-local">
-      <label><input type="checkbox"> Team mode</label>
-      <label><input type="checkbox"> Dynamic scoring</label>
-      <label><input type="checkbox"> Score freeze</label>
-      <button type="button">Save</button>
-    </form>
+    <section class="settings-block">
+      <h3 class="section-label">Branding</h3>
+      <form id="branding-form" class="admin-form">
+        <label><span>Competition name (blank uses config.toml: ${escapeHtml(c.name)})</span>
+          <input name="name" maxlength="64" value="${branding.name && branding.name !== c.name ? escapeHtml(branding.name) : ''}" placeholder="${escapeHtml(c.name)}">
+        </label>
+        <label><span>Logo URL (absolute http/https; blank uses the built-in logo)</span>
+          <input name="logo_url" type="url" value="${escapeHtml(branding.logo_url || '')}" placeholder="https://example.org/logo.png">
+        </label>
+        <div class="branding-preview">
+          <img id="branding-preview-logo" class="brand-icon" alt="logo preview" src="${escapeHtml(branding.logo_url || appPath('/feral10.jpg'))}">
+          <strong id="branding-preview-name">${escapeHtml(branding.name || c.name)}</strong>
+        </div>
+        <small class="muted">Square images around 120×120 px look best.</small>
+        <button type="submit">Save branding</button>
+      </form>
+    </section>
+    <section class="settings-block">
+      <h3 class="section-label">Competition</h3>
+      <p class="muted">These values come from config.toml and are read-only here; edit the file and restart to change them.</p>
+      <table class="scoreboard settings-table">
+        ${row('Default name', c.name)}
+        ${row('Start time', c.start_time || 'not set')}
+        ${row('End time', c.end_time || 'not set')}
+        ${row('Team mode', c.team_mode ? 'on' : 'off')}
+        ${row('Max team size', c.max_team_size)}
+        ${row('Registration', c.registration_open ? 'open' : 'closed (admins create users)')}
+        ${row('Dynamic scoring', c.dynamic_scoring ? 'on' : 'off')}
+        ${row('Freeze before end', c.score_freeze_minutes_before_end ? `${c.score_freeze_minutes_before_end} min` : 'off')}
+      </table>
+    </section>
+    <section class="settings-block">
+      <h3 class="section-label">Controls · status: ${escapeHtml(statusText)}</h3>
+      <div class="button-row">
+        <button type="button" data-competition="start">Start / reopen</button>
+        <button type="button" data-competition="freeze">Freeze scoreboard</button>
+        <button type="button" data-competition="end">End</button>
+      </div>
+    </section>
+    <section class="settings-block">
+      <h3 class="section-label">Announcement</h3>
+      <form id="announce-form" class="admin-form">
+        <input name="title" placeholder="title" required>
+        <textarea name="body" rows="3" placeholder="message"></textarea>
+        <button type="submit">Send to everyone</button>
+      </form>
+    </section>
+    <section class="settings-block">
+      <h3 class="section-label">Export &amp; backup</h3>
+      <div class="button-row">
+        <button type="button" id="export-json">Export challenges (JSON)</button>
+        <button type="button" id="backup-db">Backup database</button>
+      </div>
+    </section>
+    <section class="settings-block">
+      <h3 class="section-label">Import</h3>
+      <form id="import-form" class="admin-form">
+        <label><span>Bundle (FeralCTF or CTFd JSON)</span><input name="file" type="file" accept=".json,application/json" required></label>
+        <label><span>Attachments zip (optional, legacy)</span><input name="attachments" type="file" accept=".zip,application/zip"></label>
+        <label class="toggle-row"><span>Overwrite existing</span><span class="toggle-switch"><input type="checkbox" name="overwrite"><span class="toggle-slider"></span></span></label>
+        <label class="toggle-row"><span>Dry run</span><span class="toggle-switch"><input type="checkbox" name="dry_run" checked><span class="toggle-slider"></span></span></label>
+        <small class="muted">max ${settings.max_import_mb} MB</small>
+        <button type="submit">Import</button>
+      </form>
+      <div id="import-result"></div>
+    </section>
   `;
+  const brandingForm = document.getElementById('branding-form');
+  const previewLogo = document.getElementById('branding-preview-logo');
+  const previewName = document.getElementById('branding-preview-name');
+  previewLogo.addEventListener('error', () => {
+    previewLogo.alt = 'logo could not be loaded';
+  });
+  brandingForm.addEventListener('input', () => {
+    previewName.textContent = brandingForm.name.value.trim() || c.name;
+    const url = brandingForm.logo_url.value.trim();
+    // Preview only absolute URLs; the CSP allows the saved logo's origin
+    // once branding is saved, so a new origin may not preview until then.
+    previewLogo.src = isAbsoluteUrl(url) ? url : appPath('/feral10.jpg');
+  });
+  brandingForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const origin = (url) => (isAbsoluteUrl(url) ? new URL(url).origin : '');
+    const previousOrigin = origin(branding.logo_url);
+    try {
+      const saved = await api('/api/admin/branding', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: brandingForm.name.value.trim() || null,
+          logo_url: brandingForm.logo_url.value.trim() || null,
+        }),
+      });
+      // The CSP allows the logo's origin per page load, so a new origin
+      // needs a reload before the browser will display it.
+      if (origin(saved.logo_url) && origin(saved.logo_url) !== previousOrigin) {
+        sessionStorage.setItem('feralctf_return_view', 'admin-settings');
+        window.location.reload();
+        return;
+      }
+      await loadCompetition();
+      toast('branding saved');
+      renderAdminSettings();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+  content.querySelectorAll('[data-competition]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const action = button.dataset.competition;
+      if (action === 'end' && !window.confirm('End the competition? Players can no longer submit.')) return;
+      try {
+        await api(`/api/admin/competition/${action}`, { method: 'POST' });
+        toast(`competition: ${action}`);
+        renderAdminSettings();
+      } catch (error) {
+        toast(error.message, 'error');
+      }
+    });
+  });
+  document.getElementById('announce-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target).entries());
+    try {
+      await api('/api/admin/announce', { method: 'POST', body: JSON.stringify({ title: data.title, body: data.body }) });
+      event.target.reset();
+      toast('announcement sent');
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+  document.getElementById('export-json').addEventListener('click', () => downloadAuthed('/api/admin/export', 'feralctf-export.json'));
+  document.getElementById('backup-db').addEventListener('click', () => downloadAuthed('/api/admin/backup', 'feralctf-backup.db'));
+  document.getElementById('import-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target;
+    const body = new FormData();
+    body.append('file', form.file.files[0]);
+    if (form.attachments.files[0]) body.append('attachments', form.attachments.files[0]);
+    body.append('overwrite', form.overwrite.checked ? 'true' : 'false');
+    body.append('dry_run', form.dry_run.checked ? 'true' : 'false');
+    try {
+      const result = await api('/api/admin/import', { method: 'POST', body });
+      document.getElementById('import-result').innerHTML = importResultView(result, form.dry_run.checked);
+      if (!form.dry_run.checked) await loadChallenges();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  });
+}
+
+function importResultView(result, dryRun) {
+  const list = (title, items) => items?.length
+    ? `<h4>${title}</h4><ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`
+    : '';
+  return `
+    <div class="import-result ${result.valid ? 'ok' : 'bad'}">
+      <p><strong>${dryRun ? 'Dry run' : 'Imported'}:</strong>
+        ${result.challenges_created} created · ${result.challenges_overwritten} overwritten · ${result.challenges_skipped} skipped
+        ${result.valid ? '' : ' · <span class="bad">invalid bundle</span>'}</p>
+      ${list('Validation errors', result.validation_errors)}
+      ${list('Attachment warnings', result.attachment_warnings)}
+    </div>
+  `;
+}
+
+// Admin downloads need the Bearer token, so fetch and save via a blob URL.
+async function downloadAuthed(path, fallbackName) {
+  try {
+    const response = await fetch(appPath(path), {
+      headers: state.token ? { Authorization: `Bearer ${state.token}` } : {},
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const name = /filename="([^"]+)"/.exec(disposition)?.[1] || fallbackName;
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (error) {
+    toast(error.message, 'error');
+  }
 }
 
 function tableView(title, headers, rows) {
@@ -1064,6 +2002,15 @@ function connectWebSocket() {
         total_visible_points: message.total_visible_points ?? state.scoreboard.total_visible_points ?? 0,
       });
       if (state.view === 'scoreboard') renderScoreboard();
+    } else if (message.type === 'announcement') {
+      toast(`📣 ${message.title}`);
+      loadAnnouncements().then(() => {
+        if (state.view === 'challenges' && !document.getElementById('modal').classList.contains('open')) renderChallenges();
+      });
+    } else if (message.type === 'new_solve' && message.first_blood) {
+      toast(`🩸 first blood: ${message.team} solved ${message.challenge}`);
+    } else if (message.type === 'state_change') {
+      loadCompetition();
     }
   });
   socket.addEventListener('close', () => {
@@ -1076,7 +2023,7 @@ function connectWebSocket() {
 async function api(path, options = {}) {
   const headers = {
     Accept: 'application/json',
-    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+    ...(options.body && !(options.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}),
     ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
     ...(options.headers || {}),
   };

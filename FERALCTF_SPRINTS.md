@@ -1381,5 +1381,197 @@ no new sprint scope is required.
 
 ---
 
+## Sprint 14 — v1.0.2 UI/API Consistency + Bug Fixes
+
+**Status:** Complete (v1.0.2). **Goal:** close gaps between the API and the web UI found in a
+full audit, starting from two reports: hints/attachments could not be edited in the admin UI, and
+players could not see hints.
+
+### Security
+
+- **Invite code leak** — `GET /api/teams/{id}` needed no login and returned `invite_code`, so
+  anyone could join any team. `TeamProfileInfo.invite_code` is now only set for members of that
+  team and admins.
+
+### Hints
+
+- Admin CRUD: `GET/POST /api/admin/challenges/{id}/hints`, `PUT/DELETE /api/admin/hints/{id}`
+  (`Hint::list_admin/create/update/delete`, `HintAdmin.unlock_count`). Deleting a hint deletes its
+  unlocks and recalculates scores (refund). Content 1–4000 chars, cost ≥ 0. Audited
+  `hint.create|update|delete`.
+- Import overwrite used to delete and re-insert hints, orphaning `hint_unlocks` (teams kept paying
+  for deleted hints). `import_export::sync_hints` now upserts by `(challenge_id, sort_order)` so
+  hint ids and unlocks survive; removed hints are deleted with their unlocks; scores recalculated.
+- `Hint::unlock` uses `INSERT OR IGNORE` and charges only when a row was inserted (double-click race).
+- Policy: no unlock after the team solved the challenge (400); no unlock costing more than the
+  team score (400); free hints always allowed.
+- Player modal: hints labelled by position (`Hint 1 (free)`), confirm with cost and team score,
+  unlocked row replaced in place (typed flag kept), content rendered with `renderDescription` and
+  `white-space: pre-wrap`, "Join a team to unlock" for teamless users.
+
+### Attachments (URL-only)
+
+- An attachment is a label (`files.filename`) plus an absolute `http(s)://` URL
+  (`files.storage_path`). FeralCTF does not host or serve files; the old `/<storage_path>` links
+  always returned 404. Validation: `models::challenge::validate_attachment_url`.
+- Admin CRUD: `GET/POST /api/admin/challenges/{id}/files`, `PUT/DELETE /api/admin/files/{id}`.
+- Import/export: `ExportFile.url`; imports without an absolute URL are kept and reported in
+  `attachment_warnings`; zip/inline export skips URL rows.
+
+### Challenges and scoring
+
+- `update_challenge` / `delete_challenge` now recalculate team scores and broadcast `score_update`.
+- Delete cascades `hints`, `hint_unlocks`, `files`, `solves` in a transaction (submissions kept)
+  and clears `unlock_requires` pointing at the deleted challenge.
+- `flag_case_sensitive` is honoured: `auth::hash_flag/verify_flag(.., case_sensitive)`, regex
+  via `RegexBuilder::case_insensitive`. Changing flag type to/from regex or case sensitivity
+  requires re-entering the flag. Regex patterns are validated.
+- `unlock_requires` enforced: `ChallengePublic.locked`; detail, submit and hint unlock return 403
+  while locked; locked challenges are listed without a description.
+- `UpdateChallengeRequest.author/unlock_requires` use a `double_option` deserializer so `null`
+  clears the value (plain serde treated `null` as "keep").
+- Admin list returns `AdminChallenge` with `hint_count` / `file_count`.
+
+### Users and teams
+
+- `POST /api/admin/users` (username, password + confirm, role, `team: null | {existing_id} |
+  {new_name}`) creates accounts without a session and works when registration is closed.
+- `PUT /api/admin/users/{id}/team` reassigns teams, revokes the user's sessions, audits
+  `user.team_update`. Solves stay with the team that earned them.
+- `registration_open` and `max_team_size` enforced (register, join, admin create/assign).
+  Duplicate team names return 400 instead of 500. Admins cannot be banned without demotion first.
+
+### Competition state
+
+- Migration `003_competition_state.sql` + `src/competition.rs`: start/end/freeze are persisted
+  and combined with `start_time`, `end_time`, `score_freeze_minutes_before_end`. No row = running.
+- Players cannot submit or unlock hints before start/after end (admins exempt).
+- During a freeze the public scoreboard, graph, other teams' profiles and WebSocket updates use
+  `ScoreboardState::build_as_of(frozen_at)`; admins see live scores.
+- Public `GET /api/competition` and `GET /api/announcements`.
+
+### Admin and player UI
+
+- Real Settings page (config read-only, start/freeze/end, announcements, JSON export, DB backup,
+  import with dry-run/overwrite and warnings) replacing a form whose Save did nothing.
+- Submissions section with filters/pagination; names instead of ids (`SubmissionRecord` joins).
+- Users table shows team names; New user and Team modals with a shared team picker.
+- Cards show 💡/📎 counts, lock and solved badges; "Show solved" toggle (solved challenges used to
+  vanish). Profile shows real hints used / first bloods and hint rows in history.
+- WebSocket `announcement`, `new_solve` (first blood) and `state_change` handled; banner for
+  not started / ended / frozen. Inline-SVG score graph from `/api/scoreboard/graph`.
+- Category colours applied via `data-category-color` (inline styles were blocked by the CSP);
+  server error page inline styles moved to `style.css`. Search box keeps focus while typing.
+- `DefaultBodyLimit` on `/api/admin/import` from `storage.max_file_size_mb` (axum default 2 MB).
+- Version 1.0.2: `Cargo.toml`, `feralctf-version` meta tag injected from `CARGO_PKG_VERSION`.
+
+**Upgrade notes:** static flags marked case sensitive were stored lowercased and must be
+re-entered; legacy attachment paths show "link unavailable" until given a URL.
+
+**Acceptance:** `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
+(100 tests at end of sprint); API flow and headless-browser flow verified end to end.
+
+---
+
+## Sprint 15 — Branding (Competition Name + Logo URL)
+
+**Status:** Complete (v1.0.2). **Goal:** the competition name in Admin → Settings was ignored by
+the player UI (header hard-coded "Feral CTF"); add a logo from a URL.
+
+- Migration `004_branding.sql`: single-row `branding (name, logo_url, updated_at)`. `NULL` name
+  falls back to `competition.name` from config.toml; `NULL` logo shows the built-in `feral10.jpg`.
+- `competition::Branding`, `branding()`, `set_branding()`, `Branding::logo_origin()`;
+  `CompetitionStatus` carries `name` and `logo_url` (`GET /api/competition`).
+- `PUT /api/admin/branding` (`name` ≤ 64 chars or blank, `logo_url` absolute http(s) or blank),
+  audited `settings.branding`, broadcasts `state_change` so clients refresh.
+- `GET /api/admin/settings` includes `branding`. Export bundles use the branded name.
+- `index.html` `<title>{{COMPETITION_NAME}}</title>` rendered server-side (escaped).
+- CSP: `img-src 'self' <logo origin>` is added only when a logo is set; branding is cached in
+  `AppCache.branding` (invalidated on update) because the CSP is computed on every response.
+- Frontend: `applyBranding()` sets header name, logo and `document.title`; a broken logo falls
+  back to the built-in one. Settings has a Branding form with live preview. Because a page's CSP
+  is fixed at load, saving a logo on a new origin reloads the admin page (returning to Settings);
+  players pick up a new logo origin on their next page load (name updates live).
+
+**Acceptance:** 105 tests; browser test verified external logo loads under the CSP, server-rendered
+title, player view, fallback for a missing logo, and revert to config name.
+
+---
+
+## Sprint 16 — Reversible Flag Storage for Admin Verification
+
+**Status:** Complete (v1.0.2). **Goal:** store each static/dynamic flag a second time,
+encrypted with AES-256, so admins can reveal and verify it. **Runtime checking stays hash-only:**
+`verify_submission` never decrypts; the ciphertext exists only for admin verification.
+
+### Design
+
+- **Cipher:** AES-256-GCM (authenticated) via `ring::aead` in `src/flag_cipher.rs`. `ring` 0.17
+  was already compiled in through rustls; it is now a direct dependency (approved; no new crate).
+- **Key and IV (decided):** a 32-byte AES-256 key and one 96-bit GCM nonce (IV), both random,
+  generated once when the database is first created and stored **in the SQLite database**:
+  single-row table `flag_cipher (id = 1, key BLOB, nonce BLOB, created_at)`. The row is created by
+  `run_migrations` when missing — at `feralctf init` for new installs, and on the first start or
+  `feralctf migrate` after upgrading an existing database. It is never regenerated if present.
+- **Ciphertext format:** `flag_ciphertext = base64(ciphertext ‖ tag)` encrypted with the shared
+  key and nonce.
+- **Accepted risk (decided 2026-10-05):** the key, nonce and ciphertexts all live in `ctf.db`, so
+  anyone with the database file or an `/api/admin/backup` download can decrypt every flag. Reusing
+  one GCM nonce also means identical flags have identical ciphertext and two ciphertexts reveal
+  the XOR of their flags. These are game flags that grant no access; anyone with server access has
+  bigger problems, and compromised flags are rotated by changing the challenges. The encryption
+  only keeps flags from being stored as readable text.
+- **Schema:** migration `005_flag_cipher.sql` creates `flag_cipher` and adds
+  `challenges.flag_ciphertext TEXT NULL`. `ALTER TABLE ... ADD COLUMN` is not idempotent, so
+  `run_migrations` must check `PRAGMA table_info(challenges)` before adding the column.
+- **Write paths:** `create_challenge`, `update_challenge` (when a new flag is given), and import
+  (when the bundle carries a plaintext `flag`) encrypt alongside hashing. Regex flags are already
+  stored as plaintext patterns and are left as they are.
+- **Read path:** `GET /api/admin/challenges/{id}/flag` → `{ "flag": "...", "stored": true }` or
+  `{ "stored": false }` for legacy rows; admin-only, audited `challenge.flag_reveal`. Ciphertext is
+  never included in list, public, or export responses (`Challenge` serialization must skip it).
+- **Admin UI:** "Reveal flag" button in the edit modal (replaces the hash tooltip); legacy
+  challenges show "not stored — re-enter the flag to enable reveal".
+- **Legacy data:** existing challenges have only hashes and cannot be backfilled.
+- **Backwards compatibility (decided):** running CTFs must not break. `run_migrations` (run on
+  every start and by `feralctf migrate`) adds the table, column and key to existing databases.
+  Write paths use `flag_cipher::try_encrypt`: if the key is missing or unusable the flag is stored
+  hash-only and a warning is logged, so creating, editing and importing challenges never fails
+  because of encryption. Reveal returns `stored: false` for hash-only rows and an `error` message
+  (not a 500) when a stored copy cannot be decrypted. Import overwrites keep the existing
+  ciphertext only while the flag hash is unchanged, so it can never go stale.
+
+### Open decisions
+
+1. ~~Key location~~ — decided: key and nonce stored in the SQLite database.
+2. ~~Nonce strategy~~ — decided: GCM with one nonce created with the database.
+3. Exports — kept as before: no plaintext static flags. Ciphertext is never exported, because the
+   key is per database. Revisit if portable exports are needed.
+4. Key rotation CLI (`feralctf rotate-flag-key`) — deferred.
+
+### Tests / acceptance
+
+- Encrypt → decrypt round trip; tampered ciphertext fails to decrypt (GCM tag check).
+- `flag_cipher` row created once: running migrations again keeps the same key and nonce.
+- Submissions verify against the hash even when the ciphertext is missing or undecryptable.
+- Reveal endpoint: admin-only, audited, `stored: false` for legacy rows; ciphertext absent from
+  `GET /api/admin/challenges`, `GET /api/challenges*`, and exports.
+- Migration 005 idempotent on new and existing databases.
+- Missing key: challenge create/update/import still succeed hash-only; reveal degrades.
+
+**UI tests:** `tests/ui/run_ui_tests.py` drives the player and admin UI with Selenium and Chrome
+(pinned in `tests/ui/requirements.txt`, installed into `tests/ui/.venv` on first run; Selenium
+Manager downloads Chrome for Testing when Chrome is not installed) and seeds data with
+`requests`. Page JavaScript runs via the DevTools protocol so the CSP stays active for the app. It builds the binary, runs it on a free
+port with a temporary database, and fails on unexpected browser console errors (including CSP
+violations).
+
+**Result:** 116 tests (adds route-guard, pre-Sprint-16 upgrade, frozen WebSocket broadcast, regex
+reveal, missing-key and wrong-key tests). Verified a database created by the v1.0.1 binary upgrades
+in place: scores and sessions kept, existing flags still solve, competition not locked, legacy
+challenges show "not stored" until the flag is re-entered.
+
+---
+
 *End of sprint definitions.*
 *FeralCTF — Apache 2.0 · CyberSquirrels CTF Team*

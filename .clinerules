@@ -13,3 +13,5 @@
 * Try not to make assumptions; ask for clarity.
 
 * Adhere to the specification for structures and interfaces.
+
+* Never commit code (no `git commit`, push or tag). Committing is a human approval gate; leave changes uncommitted for review.

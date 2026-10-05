@@ -1,20 +1,23 @@
 use crate::AppState;
 use crate::handlers::admin::{
     announce, backup, ban_user, competition_end, competition_freeze, competition_start,
-    create_challenge, dashboard, delete_challenge, disqualify_team, export_bundle, get_teams,
-    get_users, import_bundle, list_admin_challenges, list_submissions, require_admin,
-    update_challenge, update_team_disqualified, update_user_password, update_user_role,
+    create_challenge, create_file, create_hint, create_user, dashboard, delete_challenge,
+    delete_file, delete_hint, disqualify_team, export_bundle, get_settings, get_teams, get_users,
+    import_bundle, list_admin_challenges, list_files, list_hints, list_submissions, require_admin,
+    reveal_flag, update_branding, update_challenge, update_file, update_hint,
+    update_team_disqualified, update_user_password, update_user_role, update_user_team,
 };
 use crate::handlers::auth::{change_password, login, logout, me, register};
 use crate::handlers::challenges::{get_challenge, list_challenges, submit_flag, unlock_hint};
 use crate::handlers::scoreboard::{
-    create_team, get_scoreboard, get_scoreboard_graph, get_team_profile, join_team,
+    create_team, get_competition, get_scoreboard, get_scoreboard_graph, get_team_profile,
+    join_team, list_announcements,
 };
 use crate::handlers::ws::ws_handler;
 use axum::{
     Router,
     body::Body,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::{HeaderValue, Method, StatusCode, Uri, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -32,6 +35,14 @@ struct FrontendAssets;
 pub fn create_router(state: AppState) -> Router {
     let cors = cors_layer(&state);
     let base_path = public_base_path(&state.config.server.base_url);
+    let import_body_limit = usize::try_from(
+        state
+            .config
+            .storage
+            .max_file_size_mb
+            .saturating_mul(1024 * 1024),
+    )
+    .unwrap_or(usize::MAX);
     let admin_router = Router::new()
         .route("/api/admin", get(dashboard))
         .route(
@@ -42,8 +53,28 @@ pub fn create_router(state: AppState) -> Router {
             "/api/admin/challenges/{id}",
             put(update_challenge).delete(delete_challenge),
         )
+        .route("/api/admin/challenges/{id}/flag", get(reveal_flag))
+        .route(
+            "/api/admin/challenges/{id}/hints",
+            get(list_hints).post(create_hint),
+        )
+        .route(
+            "/api/admin/hints/{id}",
+            put(update_hint).delete(delete_hint),
+        )
+        .route(
+            "/api/admin/challenges/{id}/files",
+            get(list_files).post(create_file),
+        )
+        .route(
+            "/api/admin/files/{id}",
+            put(update_file).delete(delete_file),
+        )
         .route("/api/admin/submissions", get(list_submissions))
-        .route("/api/admin/users", get(get_users))
+        .route("/api/admin/users", get(get_users).post(create_user))
+        .route("/api/admin/users/{id}/team", put(update_user_team))
+        .route("/api/admin/settings", get(get_settings))
+        .route("/api/admin/branding", put(update_branding))
         .route("/api/admin/users/{id}/ban", post(ban_user))
         .route("/api/admin/users/{id}/role", put(update_user_role))
         .route("/api/admin/users/{id}/password", put(update_user_password))
@@ -58,7 +89,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/admin/competition/freeze", post(competition_freeze))
         .route("/api/admin/announce", post(announce))
         .route("/api/admin/export", get(export_bundle))
-        .route("/api/admin/import", post(import_bundle))
+        .route(
+            "/api/admin/import",
+            post(import_bundle).layer(DefaultBodyLimit::max(import_body_limit)),
+        )
         .route("/api/admin/backup", get(backup))
         .route_layer(middleware::from_fn_with_state(state.clone(), require_admin));
 
@@ -83,6 +117,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/teams/{id}", get(get_team_profile))
         .route("/api/teams", post(create_team))
         .route("/api/teams/join", post(join_team))
+        .route("/api/competition", get(get_competition))
+        .route("/api/announcements", get(list_announcements))
         // WebSocket
         .route("/ws", get(ws_handler))
         // Admin (require_admin middleware applied inside admin_router)
@@ -97,7 +133,10 @@ pub fn create_router(state: AppState) -> Router {
     };
 
     app.fallback(frontend)
-        .layer(middleware::from_fn(security_headers))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            security_headers,
+        ))
         .layer(cors)
         .with_state(state)
 }
@@ -122,7 +161,35 @@ fn cors_layer(state: &AppState) -> CorsLayer {
     }
 }
 
-async fn security_headers(request: Request, next: Next) -> Response {
+/// Current branding, or the config default if the database is unavailable.
+fn current_branding(state: &AppState) -> crate::competition::Branding {
+    state
+        .db
+        .get()
+        .ok()
+        .and_then(|conn| {
+            state
+                .cache
+                .get_or_load_branding(&conn, &state.config.competition)
+                .ok()
+        })
+        .unwrap_or_else(|| crate::competition::Branding {
+            name: state.config.competition.name.clone(),
+            logo_url: None,
+        })
+}
+
+/// The CSP allows images only from this origin plus the admin-configured
+/// logo's origin.
+fn content_security_policy(logo_origin: Option<&str>) -> String {
+    let img_src = match logo_origin {
+        Some(origin) => format!("img-src 'self' {origin}; "),
+        None => String::new(),
+    };
+    format!("default-src 'self'; {img_src}connect-src 'self' ws: wss:")
+}
+
+async fn security_headers(State(state): State<AppState>, request: Request, next: Next) -> Response {
     // FERALCTF_SPEC.md §6.6 requires these headers on every response.
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
@@ -135,9 +202,12 @@ async fn security_headers(request: Request, next: Next) -> Response {
         "Referrer-Policy",
         HeaderValue::from_static("strict-origin-when-cross-origin"),
     );
+    let csp = content_security_policy(current_branding(&state).logo_origin().as_deref());
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static("default-src 'self'; connect-src 'self' ws: wss:"),
+        HeaderValue::from_str(&csp).unwrap_or_else(|_| {
+            HeaderValue::from_static("default-src 'self'; connect-src 'self' ws: wss:")
+        }),
     );
     response
 }
@@ -151,7 +221,8 @@ async fn frontend(State(state): State<AppState>, uri: Uri) -> Response {
     }
 
     if path.is_empty() {
-        return index_response(&base_path).unwrap_or_else(|| {
+        let name = current_branding(&state).name;
+        return index_response(&base_path, &name).unwrap_or_else(|| {
             (StatusCode::INTERNAL_SERVER_ERROR, "frontend missing").into_response()
         });
     }
@@ -186,12 +257,12 @@ fn error_page(status: StatusCode, path: &str, base_path: &str) -> Response {
         <p class="muted">terminal capture console</p>
       </div>
     </header>
-    <main style="display:flex;align-items:center;justify-content:center;padding:4rem 1rem">
-      <section class="panel" style="text-align:center;max-width:480px">
-        <p class="muted" style="font-size:3rem;margin:0">{code}</p>
-        <h2 style="margin:.5rem 0 1rem">{reason}</h2>
+    <main class="error-page">
+      <section class="panel error-panel">
+        <p class="muted error-code">{code}</p>
+        <h2 class="error-reason">{reason}</h2>
         <p class="muted"><code>{safe_path}</code> does not exist</p>
-        <a href="{home_path}" style="display:inline-block;margin-top:1.5rem">← back to terminal</a>
+        <a class="error-home" href="{home_path}">← back to terminal</a>
       </section>
     </main>
   </div>
@@ -205,8 +276,8 @@ fn error_page(status: StatusCode, path: &str, base_path: &str) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-fn index_response(base_path: &str) -> Option<Response> {
-    let html = render_index_html(base_path)?;
+fn index_response(base_path: &str, competition_name: &str) -> Option<Response> {
+    let html = render_index_html(base_path, competition_name)?;
     match Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
@@ -218,11 +289,15 @@ fn index_response(base_path: &str) -> Option<Response> {
     }
 }
 
-fn render_index_html(base_path: &str) -> Option<String> {
+fn render_index_html(base_path: &str, competition_name: &str) -> Option<String> {
     let asset = FrontendAssets::get("index.html")?;
     let html = String::from_utf8(asset.data.into_owned()).ok()?;
     let safe_base_path = html_attr_escape(base_path);
-    Some(html.replace("{{BASE_PATH}}", &safe_base_path))
+    Some(
+        html.replace("{{BASE_PATH}}", &safe_base_path)
+            .replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
+            .replace("{{COMPETITION_NAME}}", &html_attr_escape(competition_name)),
+    )
 }
 
 fn asset_response(path: &str) -> Option<Response> {
@@ -330,7 +405,7 @@ mod tests {
 
     #[test]
     fn render_index_html_injects_base_path() {
-        let html = render_index_html("/server/feralctf").expect("embedded index");
+        let html = render_index_html("/server/feralctf", "FeralCTF").expect("embedded index");
 
         assert!(html.contains(r#"href="/server/feralctf/style.css""#));
         assert!(html.contains(r#"href="/server/feralctf/favicon.ico""#));
@@ -341,8 +416,78 @@ mod tests {
     }
 
     #[test]
+    fn render_index_html_injects_escaped_competition_name() {
+        let html = render_index_html("", "Squirrels <&> CTF").expect("embedded index");
+        assert!(html.contains("<title>Squirrels &lt;&amp;&gt; CTF</title>"));
+        assert!(!html.contains("{{COMPETITION_NAME}}"));
+    }
+
+    #[test]
+    fn csp_adds_only_the_logo_origin_to_img_src() {
+        assert_eq!(
+            content_security_policy(None),
+            "default-src 'self'; connect-src 'self' ws: wss:"
+        );
+        assert_eq!(
+            content_security_policy(Some("https://cdn.example.org")),
+            "default-src 'self'; img-src 'self' https://cdn.example.org; connect-src 'self' ws: wss:"
+        );
+    }
+
+    #[tokio::test]
+    async fn branding_drives_title_and_csp() {
+        let state = test_state("http://localhost:8080");
+        {
+            let conn = state.db.get().expect("conn");
+            crate::competition::set_branding(
+                &conn,
+                Some("Squirrel Games"),
+                Some("https://cdn.example.org/logo.png"),
+                1,
+            )
+            .expect("branding");
+        }
+        let app = create_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("response");
+        let csp = response
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            csp.contains("img-src 'self' https://cdn.example.org;"),
+            "{csp}"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let html = String::from_utf8(body.to_vec()).expect("utf8");
+        assert!(html.contains("<title>Squirrel Games</title>"));
+    }
+
+    #[test]
+    fn render_index_html_injects_version() {
+        let html = render_index_html("", "FeralCTF").expect("embedded index");
+        assert!(html.contains(&format!(
+            r#"name="feralctf-version" content="{}""#,
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(!html.contains("{{VERSION}}"));
+        assert_eq!(env!("CARGO_PKG_VERSION"), "1.0.2");
+    }
+
+    #[test]
     fn render_index_html_preserves_root_deployment() {
-        let html = render_index_html("").expect("embedded index");
+        let html = render_index_html("", "FeralCTF").expect("embedded index");
 
         assert!(html.contains(r#"href="/style.css""#));
         assert!(html.contains(r#"href="/favicon.ico""#));
@@ -537,6 +682,88 @@ mod tests {
             .expect("register get response");
 
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[tokio::test]
+    async fn new_admin_routes_require_an_admin_session() {
+        let state = test_state("http://admin-guard.test");
+        let player_token = {
+            let conn = state.db.get().expect("conn");
+            let user = crate::models::user::User::create(
+                &conn,
+                &crate::models::user::RegisterRequest {
+                    username: format!("guard-{}", uuid::Uuid::new_v4().simple()),
+                    email: None,
+                    password: String::new(),
+                    team_name: None,
+                    invite_code: None,
+                },
+                "hash",
+            )
+            .expect("user");
+            drop(conn);
+            let now = chrono::Utc::now().timestamp() as u64;
+            let token = crate::auth::sign_jwt(
+                &crate::auth::Claims {
+                    sub: user.id,
+                    role: "player".into(),
+                    team_id: None,
+                    iat: now,
+                    exp: now + 3600,
+                },
+                &state.config.auth.jwt_secret,
+            )
+            .expect("jwt");
+            crate::auth::create_session(&state.db, user.id, &token, 1).expect("session");
+            token
+        };
+        let app = create_router(state);
+        let routes = [
+            (Method::GET, "/api/admin/challenges/1/flag", ""),
+            (Method::GET, "/api/admin/challenges/1/hints", ""),
+            (
+                Method::POST,
+                "/api/admin/challenges/1/hints",
+                r#"{"content":"x","cost_points":0}"#,
+            ),
+            (Method::PUT, "/api/admin/hints/1", "{}"),
+            (Method::DELETE, "/api/admin/hints/1", ""),
+            (
+                Method::POST,
+                "/api/admin/challenges/1/files",
+                r#"{"label":"x","url":"https://e.x/y"}"#,
+            ),
+            (Method::DELETE, "/api/admin/files/1", ""),
+            (Method::POST, "/api/admin/users", "{}"),
+            (Method::PUT, "/api/admin/users/1/team", r#"{"team":null}"#),
+            (Method::GET, "/api/admin/settings", ""),
+            (Method::PUT, "/api/admin/branding", "{}"),
+        ];
+        for (method, uri, body) in routes {
+            for (token, expected) in [
+                (None, StatusCode::UNAUTHORIZED),
+                (Some(player_token.as_str()), StatusCode::FORBIDDEN),
+            ] {
+                let mut request = Request::builder()
+                    .method(method.clone())
+                    .uri(uri)
+                    .header(header::CONTENT_TYPE, "application/json");
+                if let Some(token) = token {
+                    request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+                }
+                let response = app
+                    .clone()
+                    .oneshot(request.body(Body::from(body)).expect("request"))
+                    .await
+                    .expect("response");
+                assert_eq!(
+                    response.status(),
+                    expected,
+                    "{method} {uri} token={}",
+                    token.is_some()
+                );
+            }
+        }
     }
 
     fn test_state(base_url: &str) -> AppState {

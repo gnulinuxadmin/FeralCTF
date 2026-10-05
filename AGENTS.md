@@ -2,8 +2,8 @@
 
 Project guidance for AI coding agents working on FeralCTF.
 
-**Current version: 1.0rc5.** All sprints (0–13) complete. Post-sprint UI and admin improvements
-are documented in `FERALCTF_SPRINTS.md` §Post-Sprint 13 and `MEMORY.md` §Post-Sprint 13.
+**Current version: 1.0.2.** All sprints (0–16) complete. See `FERALCTF_SPRINTS.md` and
+`MEMORY.md` for per-sprint notes.
 
 ## Source Of Truth
 
@@ -23,6 +23,7 @@ Do not edit spec files unless explicitly instructed:
 
 ## Project Rules
 
+- **Never commit.** Never run `git commit` (or push, tag, or otherwise create commits) in this project. Committing is a human approval gate: leave changes in the working tree, report what changed and how it was verified, and let a person review and commit.
 - Do not add dependencies without approval.
 - Do not use `sqlx`; this project uses `rusqlite` and `r2d2_sqlite`.
 - No `unwrap()` in non-test code.
@@ -39,6 +40,12 @@ cargo fmt
 cargo check
 cargo test
 cargo clippy --all-targets --all-features
+```
+
+For frontend changes also run the browser UI tests (Selenium; self-installing venv):
+
+```bash
+python3 tests/ui/run_ui_tests.py
 ```
 
 ## Sprint Workflow
@@ -86,7 +93,8 @@ When using multiple agents or models:
 - `models::scoreboard::ScoreboardState` is the canonical scoreboard model.
 - `cache::ScoreboardState` is not canonical for Sprint 4+.
 - Flags must never be exposed through public challenge types.
-- Flags are stored as salted hashes, not plaintext.
+- Flags are verified only against salted hashes. Static flags also have an AES-256-GCM copy
+  (`challenges.flag_ciphertext`, key in `flag_cipher`) used solely for audited admin reveal.
 - Auth uses Argon2id and HS256 JWTs with server-side session revocation.
 
 ## Editing Discipline
@@ -107,3 +115,4 @@ A task is not done until:
 - Relevant tests pass.
 - `cargo clippy --all-targets --all-features` is clean.
 - No sensitive data leaks through public response structs.
+- Changes are left uncommitted for human review (see Project Rules).

@@ -270,7 +270,7 @@ mod tests {
         assert!(!check_flag_sharing(&conn, 1, 1, "flag{other}", 60).unwrap());
 
         let salt = "salt";
-        let hashed = auth::hash_flag("flag{not-raw}", salt);
+        let hashed = auth::hash_flag("flag{not-raw}", salt, false);
         assert!(!check_flag_sharing(&conn, 1, 1, &hashed, 60).unwrap());
     }
 }

@@ -4,7 +4,7 @@ Persistent project memory for agents working on FeralCTF.
 
 ## Current Status
 
-Version: **1.0rc5** — all sprints complete, post-sprint UI and admin improvements shipped.
+Version: **1.0.2** — Sprints 0–16 complete.
 
 Sprints complete:
 
@@ -23,24 +23,37 @@ Sprints complete:
 - Sprint 12 - Frontend SPA
 - Sprint 13 - CLI Subcommands + Hardening
 - Post-Sprint (1.0rc) - UI + Admin fixes (see FERALCTF_SPRINTS.md §Post-Sprint 13)
+- Sprint 14 - v1.0.2 UI/API consistency + bug fixes
+- Sprint 15 - Branding (competition name + logo URL)
+- Sprint 16 - Reversible AES-256-GCM flag storage for admin verification
 
-Next sprint: none currently defined.
+Next sprint: none currently defined. Deferred: flag-key rotation CLI, plaintext flags in exports.
 
 ## Verified Baseline
 
 Last known clean commands:
 
 ```bash
-cargo check
+cargo fmt --check
 cargo test
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets -- -D warnings
 ```
 
 Last known test count:
 
 ```text
-50 passed
+116 passed
 ```
+
+Browser UI tests (Selenium + Chrome, self-installing venv in `tests/ui/.venv`):
+
+```bash
+python3 tests/ui/run_ui_tests.py
+```
+
+4 scenarios: player challenges/hints, admin challenge editors (incl. flag reveal), admin users and
+submissions, settings/announcement/branding. Add a `test_*` function to `SCENARIOS` in
+`tests/ui/run_ui_tests.py` for new UI features; seed data through `Server.api` (requests).
 
 ## Key Implementation Notes
 
@@ -391,8 +404,57 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
   overrides. `src/tls.rs` implements a Rustls-backed Axum listener that loads PEM certificate,
   private key, and optional chain; `src/main.rs` selects HTTPS when `server.tls_enabled = true`.
 
+### Sprint 14 (v1.0.2 consistency + bug fixes)
+
+- **Attachments are URL-only** — label in `files.filename`, absolute `http(s)://` URL in
+  `files.storage_path`, validated by `models::challenge::validate_attachment_url`. Nothing is
+  uploaded or served; legacy relative rows render as "link unavailable".
+- **Hints** — admin CRUD in `src/handlers/admin.rs`; `Hint::unlock` returns `false` when the unlock
+  already existed (charge once). `unlock_hint` rejects solved challenges and costs above the team
+  score. Import overwrite uses `sync_hints` (match by `sort_order`) so unlocks survive.
+- **Scores** — any change to points, visibility, hints or solves must call
+  `scoring::recalculate_*` and `handlers::scoreboard::broadcast_score_update` (which also
+  invalidates the scoreboard cache and respects a freeze).
+- **Competition state** — `src/competition.rs` + migration 003. `status()` combines DB controls with
+  config times; `ensure_running()` gates player submissions/unlocks; `public_scoreboard()` returns
+  `ScoreboardState::build_as_of(frozen_at)` during a freeze. Admins bypass both.
+- **Prerequisites** — `Challenge::is_locked_for_team`; locked → 403 on detail/submit/unlock.
+- **Flags** — `auth::hash_flag(flag, salt, case_sensitive)`. Case-insensitive flags are lowercased
+  before hashing; changing type/case requires re-entering the flag.
+- **Users/teams** — `POST /api/admin/users`, `PUT /api/admin/users/{id}/team` (`TeamAssignment`
+  enum: `{existing_id}` / `{new_name}` / null). `Team::ensure_has_room` enforces `max_team_size`.
+- **Invite codes** — only returned by `GET /api/teams/{id}` to members and admins.
+- **Partial updates** — use `double_option` for nullable fields so `null` clears and absent keeps.
+- **Frontend** — CSP blocks inline `style` attributes: use data attributes + DOM assignment
+  (`applyProgressWidths`, `applyCategoryColors`). `api()` skips JSON Content-Type for `FormData`;
+  admin downloads use `downloadAuthed()` (Bearer token, no cookies).
+
+### Sprint 15 (branding)
+
+- Migration 004 `branding` row; `competition::branding()` falls back to `competition.name` and the
+  built-in logo. `PUT /api/admin/branding` saves, invalidates `AppCache.branding`, broadcasts
+  `state_change`.
+- The CSP is built per response in `routes::security_headers` and adds `img-src 'self' <logo
+  origin>` only when a logo is set. A page keeps the CSP it loaded with, so a new logo origin needs
+  a reload (the admin page reloads itself after saving).
+- `index.html` placeholders: `{{BASE_PATH}}`, `{{VERSION}}`, `{{COMPETITION_NAME}}` (escaped).
+
+### Sprint 16 (reversible flag storage)
+
+- `src/flag_cipher.rs`: AES-256-GCM via `ring::aead`; key + one shared nonce in the `flag_cipher`
+  row (migration 005), created by `run_migrations` if missing and never regenerated. Accepted
+  risk: anyone with the DB can decrypt, equal flags encrypt equally — these are game flags.
+- `challenges.flag_ciphertext` is added by `db::add_column_if_missing` (ALTER is not idempotent).
+  `Challenge.flag_ciphertext` is `#[serde(skip_serializing)]` — never in any response or export.
+- Write paths (admin create/update, import) call `flag_cipher::try_encrypt` (best-effort, logs a
+  warning). Import overwrite keeps ciphertext only while `flag_hash` is unchanged.
+- `GET /api/admin/challenges/{id}/flag` reveals (audited `challenge.flag_reveal`); regex returns
+  the stored pattern; `error` is set when decryption fails.
+
 ## Known Cautions
 
+- **Never commit.** Agents must not run `git commit`/push/tag in this project; committing is a
+  human approval gate. Leave changes uncommitted and report them for review.
 - Do not revive old single-connection database abstractions.
 - Do not add frontend build tooling.
 - Do not store plaintext flags.
@@ -401,3 +463,8 @@ feralctf import <file> [--attachments <dir>] [--overwrite] [--dry-run]
 - Flag-sharing detection is alert-only; do not auto-disqualify teams from this signal.
 - Do not edit spec files.
 - Do not advance `FERALCTF_SPRINTS.state` until verification passes.
+- Attachments must stay URL-only; do not add upload or file-serving endpoints.
+- Do not widen the CSP `img-src` beyond `'self'` plus the configured logo origin.
+- Runtime flag checks are hash-only; flag ciphertext is for admin reveal only.
+- Keep upgrades backwards compatible: new schema goes through idempotent `run_migrations`, and
+  optional features (like flag encryption) must degrade instead of failing writes.

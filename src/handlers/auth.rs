@@ -35,7 +35,7 @@ fn extract_bearer(headers: &HeaderMap) -> Result<&str, AppError> {
         .ok_or(AppError::Unauthorized)
 }
 
-fn validate_username(username: &str) -> Result<(), AppError> {
+pub(crate) fn validate_username(username: &str) -> Result<(), AppError> {
     let n = username.len();
     if !(3..=32).contains(&n) {
         return Err(AppError::BadRequest(
@@ -95,6 +95,27 @@ pub async fn register(
     }
 
     let is_first = User::count(&conn)? == 0;
+    // The very first account (the bootstrap admin) can always register.
+    if !is_first && !state.config.competition.registration_open {
+        return Err(AppError::BadRequest(
+            "registration is closed; ask an admin for an account".into(),
+        ));
+    }
+    // Resolve the team before creating the user so a bad team request
+    // doesn't leave an orphaned account.
+    let join_team = if let Some(ref name) = req.team_name {
+        if Team::find_by_name(&conn, name.trim())?.is_some() {
+            return Err(AppError::BadRequest("team name already taken".into()));
+        }
+        None
+    } else if let Some(ref code) = req.invite_code {
+        let team = Team::find_by_invite_code(&conn, code.trim())?
+            .ok_or_else(|| AppError::BadRequest("invalid invite code".into()))?;
+        Team::ensure_has_room(&conn, team.id, state.config.competition.max_team_size)?;
+        Some(team)
+    } else {
+        None
+    };
     let password_hash = auth::hash_password(&req.password)?;
     let user = User::create(&conn, &req, &password_hash)?;
 
@@ -107,11 +128,9 @@ pub async fn register(
 
     // Team handling
     if let Some(ref name) = req.team_name {
-        let team = Team::create(&conn, name)?;
+        let team = Team::create(&conn, name.trim())?;
         Team::add_member(&conn, team.id, user.id)?;
-    } else if let Some(ref code) = req.invite_code {
-        let team = Team::find_by_invite_code(&conn, code)?
-            .ok_or_else(|| AppError::BadRequest("invalid invite code".into()))?;
+    } else if let Some(team) = join_team {
         Team::add_member(&conn, team.id, user.id)?;
     }
 
@@ -447,5 +466,71 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[tokio::test]
+    async fn registration_closed_allows_only_bootstrap_admin() {
+        let pool = Pool::new(SqliteConnectionManager::memory()).unwrap();
+        db::run_migrations(&pool.get().unwrap()).unwrap();
+        let mut config = Config::default();
+        config.competition.registration_open = false;
+        let state = AppState {
+            db: pool,
+            config: Arc::new(config),
+            cache: Arc::new(AppCache::new()),
+            ws_hub: Arc::new(crate::WsHub::new()),
+            rate_limiter: Arc::new(crate::anticheat::RateLimiter::new()),
+        };
+        let Json(first) = register(State(state.clone()), Json(reg("bootstrap")))
+            .await
+            .unwrap();
+        assert_eq!(first.user.role, "admin");
+        let err = register(State(state), Json(reg("latecomer")))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(ref m) if m.contains("closed")));
+    }
+
+    #[tokio::test]
+    async fn register_rejects_full_team_and_duplicate_team_name() {
+        let pool = Pool::new(SqliteConnectionManager::memory()).unwrap();
+        db::run_migrations(&pool.get().unwrap()).unwrap();
+        let mut config = Config::default();
+        config.competition.max_team_size = 1;
+        let state = AppState {
+            db: pool,
+            config: Arc::new(config),
+            cache: Arc::new(AppCache::new()),
+            ws_hub: Arc::new(crate::WsHub::new()),
+            rate_limiter: Arc::new(crate::anticheat::RateLimiter::new()),
+        };
+        let mut founder = reg("founder");
+        founder.team_name = Some("Solo".into());
+        let _ = register(State(state.clone()), Json(founder)).await.unwrap();
+        let invite = {
+            let conn = state.db.get().unwrap();
+            Team::find_by_name(&conn, "Solo")
+                .unwrap()
+                .unwrap()
+                .invite_code
+        };
+
+        let mut joiner = reg("joiner");
+        joiner.invite_code = Some(invite);
+        let err = register(State(state.clone()), Json(joiner))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(ref m) if m.contains("full")));
+
+        let mut copycat = reg("copycat");
+        copycat.team_name = Some("Solo".into());
+        let err = register(State(state.clone()), Json(copycat))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(ref m) if m.contains("taken")));
+
+        let conn = state.db.get().unwrap();
+        assert!(User::find_by_username(&conn, "joiner").unwrap().is_none());
+        assert!(User::find_by_username(&conn, "copycat").unwrap().is_none());
     }
 }
