@@ -4,3 +4,5 @@
 *.db-wal
 frontend/dist
 config.toml
+tests/ui/.venv
+__pycache__/

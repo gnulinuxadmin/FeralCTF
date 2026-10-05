@@ -15,15 +15,45 @@ For deep technical details, see [FERALCTF_SPEC.md](FERALCTF_SPEC.md).
 
 ## Status
 
-Current release: **v1.0.0** — all core sprints complete. Feature-complete for small-to-medium competitions;
+Current release: **v1.0.2** — all core sprints complete. Feature-complete for small-to-medium competitions;
 see [§11 Out of Scope](FERALCTF_SPEC.md) for deferred items.
+
+### v1.0.2
+
+- Admins can create, edit, reorder and delete hints, and manage attachments, from the challenge edit dialog.
+- Attachments are links: each one is a label plus an absolute `http(s)://` URL. FeralCTF no longer
+  serves attachment files. Imported files without a URL are kept and flagged so you can add one.
+- Players see hint and attachment counts on challenge cards. Hints show their cost, ask for
+  confirmation, can't push a team below zero, and can't be unlocked after the team has solved the challenge.
+- Admins can create user accounts and assign them to an existing or new team, and can move existing users between teams.
+- Challenge prerequisites, start/end times, scoreboard freeze, `registration_open` and `max_team_size` are enforced.
+- Score totals are recalculated after challenge edits and deletes; deleting a challenge or hint
+  removes its dependent data.
+- Team invite codes are only shown to that team's members and to admins.
+- Real admin settings page (competition status and controls, announcements, import, export, backup),
+  a submissions log, and a score graph.
+- Branding: set the competition name and a logo URL in Admin → Settings; the player UI, page
+  title and exports use them.
+- Admins can reveal a challenge's flag for verification. Flags are also stored encrypted
+  (AES-256-GCM, key kept in the database); players' submissions are still checked against the hash.
+
+**Upgrade notes:**
+
+- Flag case sensitivity is now honoured. Static flags on challenges marked case sensitive were
+  previously stored lowercased, so re-enter those flags. To find them:
+  `SELECT id, title FROM challenges WHERE flag_case_sensitive = 1 AND flag_type != 'regex';`
+- Existing attachment rows that hold a file path rather than a URL show as "link unavailable" until
+  you set a URL in the admin edit dialog.
+- Existing databases upgrade automatically on start. Challenges created before 1.0.2 have no
+  stored copy of their flag, so "Reveal flag" says "not stored" until you re-enter the flag; play is
+  unaffected. The flag key lives in `ctf.db`, so treat database backups as containing the flags.
 
 ## Features
 
 - Web-based user registration, login, logout, password change, and server-side session revocation
 - First registered user becomes the initial admin; admin navigation is hidden from non-admin accounts
 - Team creation and invite-code joining
-- Challenge list and detail views with files, hints, solve status, categories, search, and flag submission
+- Challenge list and detail views with attachment links, hints, solve status, categories, search, and flag submission
 - Static and regex flag validation with salted hashes for static flags
 - Dynamic scoring, score recalculation, score history, and cached scoreboard reads
 - Live scoreboard updates over WebSocket
@@ -178,6 +208,21 @@ cargo check
 cargo test
 cargo clippy --all-targets --all-features
 ```
+
+Browser UI tests (Python 3.9+, uses Selenium with Chrome):
+
+```bash
+python3 tests/ui/run_ui_tests.py              # all scenarios
+python3 tests/ui/run_ui_tests.py -k branding  # scenarios whose name matches
+python3 tests/ui/run_ui_tests.py --headed     # watch the browser
+```
+
+The first run creates `tests/ui/.venv` and installs the pinned packages from
+`tests/ui/requirements.txt`. Selenium Manager uses an installed Google Chrome, or downloads
+Chrome for Testing and chromedriver into `~/.cache/selenium` when none is installed (network
+needed once, about 400 MB). Each run builds the debug binary, starts it with a fresh database
+in a temporary directory, seeds data through the API and drives the player and admin UI.
+Failures print a screenshot path and keep the temporary directory (including `server.log`).
 
 Build a release binary:
 

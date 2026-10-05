@@ -2,6 +2,8 @@ use dashmap::DashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::{
+    competition::Branding,
+    config::CompetitionConfig,
     db::DbConn,
     errors::AppError,
     models::{challenge::Challenge, scoreboard::ScoreboardState},
@@ -11,6 +13,8 @@ use crate::{
 pub struct AppCache {
     pub scoreboard: Arc<RwLock<Option<ScoreboardState>>>,
     pub challenges: Arc<RwLock<Option<Vec<Challenge>>>>,
+    /// Read on every response for the CSP, so kept out of SQLite.
+    pub branding: Arc<RwLock<Option<Branding>>>,
     pub sessions: Arc<DashMap<String, String>>,
 }
 
@@ -25,6 +29,7 @@ impl AppCache {
         Self {
             scoreboard: Arc::new(RwLock::new(None)),
             challenges: Arc::new(RwLock::new(None)),
+            branding: Arc::new(RwLock::new(None)),
             sessions: Arc::new(DashMap::new()),
         }
     }
@@ -77,6 +82,33 @@ impl AppCache {
             .map_err(|_| anyhow::anyhow!("challenge cache lock poisoned"))? =
             Some(challenges.clone());
         Ok(challenges)
+    }
+
+    pub fn invalidate_branding(&self) {
+        if let Ok(mut branding) = self.branding.write() {
+            *branding = None;
+        }
+    }
+
+    pub fn get_or_load_branding(
+        &self,
+        conn: &DbConn,
+        config: &CompetitionConfig,
+    ) -> Result<Branding, AppError> {
+        if let Some(branding) = self
+            .branding
+            .read()
+            .map_err(|_| anyhow::anyhow!("branding cache lock poisoned"))?
+            .clone()
+        {
+            return Ok(branding);
+        }
+        let branding = crate::competition::branding(conn, config)?;
+        *self
+            .branding
+            .write()
+            .map_err(|_| anyhow::anyhow!("branding cache lock poisoned"))? = Some(branding.clone());
+        Ok(branding)
     }
 
     pub fn is_scoreboard_cached(&self) -> bool {

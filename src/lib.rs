@@ -5,10 +5,12 @@
 pub mod anticheat;
 pub mod auth;
 pub mod cache;
+pub mod competition;
 pub mod config;
 pub mod database;
 pub mod db;
 pub mod errors;
+pub mod flag_cipher;
 pub mod handlers;
 pub mod import_export;
 pub mod models;

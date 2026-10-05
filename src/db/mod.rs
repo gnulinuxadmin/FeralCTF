@@ -29,6 +29,32 @@ pub fn init_pool(db_path: &str) -> Result<DbPool, Error> {
 pub fn run_migrations(conn: &rusqlite::Connection) -> Result<(), Error> {
     conn.execute_batch(include_str!("../../migrations/001_initial.sql"))?;
     conn.execute_batch(include_str!("../../migrations/002_audit_log.sql"))?;
+    conn.execute_batch(include_str!("../../migrations/003_competition_state.sql"))?;
+    conn.execute_batch(include_str!("../../migrations/004_branding.sql"))?;
+    conn.execute_batch(include_str!("../../migrations/005_flag_cipher.sql"))?;
+    add_column_if_missing(conn, "challenges", "flag_ciphertext", "TEXT")?;
+    crate::flag_cipher::ensure_key(conn)?;
+    Ok(())
+}
+
+/// `ALTER TABLE ... ADD COLUMN` fails if the column exists, so check first.
+fn add_column_if_missing(
+    conn: &rusqlite::Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), Error> {
+    let exists = conn
+        .prepare(&format!("PRAGMA table_info({table})"))?
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?
+        .iter()
+        .any(|name| name == column);
+    if !exists {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+        ))?;
+    }
     Ok(())
 }
 
@@ -66,5 +92,61 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         run_migrations(&conn).expect("first run failed");
         run_migrations(&conn).expect("second run failed — not idempotent");
+    }
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn upgrading_a_pre_sprint_16_database_adds_cipher_once() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        // Schema as it was before Sprint 16, with an existing challenge.
+        for sql in [
+            include_str!("../../migrations/001_initial.sql"),
+            include_str!("../../migrations/002_audit_log.sql"),
+            include_str!("../../migrations/003_competition_state.sql"),
+            include_str!("../../migrations/004_branding.sql"),
+        ] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.execute(
+            "INSERT INTO challenges (slug, title, description, category, flag_hash, flag_salt,
+                points, created_at)
+             VALUES ('old', 'Old', 'd', 'web', 'hash', 'salt', 100, 1)",
+            [],
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+        let key: Vec<u8> = conn
+            .query_row("SELECT key FROM flag_cipher", [], |row| row.get(0))
+            .unwrap();
+        let legacy: Option<String> = conn
+            .query_row(
+                "SELECT flag_ciphertext FROM challenges WHERE slug = 'old'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            legacy, None,
+            "existing challenges have no ciphertext to backfill"
+        );
+
+        run_migrations(&conn).unwrap();
+        let columns: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('challenges') WHERE name = 'flag_ciphertext'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 1);
+        let key_again: Vec<u8> = conn
+            .query_row("SELECT key FROM flag_cipher", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(key, key_again);
     }
 }

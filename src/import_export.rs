@@ -15,7 +15,7 @@ use crate::{
     config::Config,
     db::DbConn,
     errors::AppError,
-    models::challenge::{Challenge, ChallengeFile},
+    models::challenge::{Challenge, ChallengeFile, Hint, is_absolute_attachment_url},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -73,8 +73,13 @@ pub struct ExportHint {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExportFile {
     pub filename: String,
+    #[serde(default)]
     pub sha256: String,
+    #[serde(default)]
     pub size_bytes: i64,
+    /// Absolute http(s) URL where players fetch the attachment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<String>,
 }
@@ -126,7 +131,7 @@ pub fn export(
         feralctf_export_version: 1,
         exported_at: chrono::Utc::now().to_rfc3339(),
         competition: CompetitionMeta {
-            name: config.competition.name.clone(),
+            name: crate::competition::branding(conn, &config.competition)?.name,
             dynamic_scoring: config.competition.dynamic_scoring,
             score_freeze_minutes_before_end: config.competition.score_freeze_minutes_before_end,
             max_team_size: config.competition.max_team_size,
@@ -267,6 +272,16 @@ fn export_files(
     let files = ChallengeFile::list_by_challenge(conn, challenge_id)?;
     let mut exported = Vec::with_capacity(files.len());
     for file in files {
+        if is_absolute_attachment_url(&file.storage_path) {
+            exported.push(ExportFile {
+                filename: file.filename,
+                sha256: file.sha256,
+                size_bytes: file.size_bytes,
+                url: Some(file.storage_path),
+                data: None,
+            });
+            continue;
+        }
         let data = if inline_attachments && file.size_bytes <= 5 * 1024 * 1024 {
             let path = stored_file_path(config, &file.storage_path);
             match fs::read(path) {
@@ -280,6 +295,7 @@ fn export_files(
             filename: file.filename,
             sha256: file.sha256,
             size_bytes: file.size_bytes,
+            url: None,
             data,
         });
     }
@@ -396,15 +412,11 @@ fn apply_import(
                 continue;
             }
             conn.execute(
-                "DELETE FROM hints WHERE challenge_id = ?1",
-                params![existing.id],
-            )?;
-            conn.execute(
                 "DELETE FROM files WHERE challenge_id = ?1",
                 params![existing.id],
             )?;
             update_challenge(conn, challenge, existing.id, &slug_to_id)?;
-            import_hints(conn, challenge, existing.id)?;
+            sync_hints(conn, challenge, existing.id)?;
             import_files(conn, challenge, existing.id, attachments_dir, result)?;
             touched_slugs.insert(challenge.slug.clone());
         } else {
@@ -416,6 +428,8 @@ fn apply_import(
         }
     }
     update_unlock_requirements(conn, bundle, &slug_to_id, &touched_slugs)?;
+    // Overwritten points or removed hints change team totals.
+    crate::scoring::recalculate_all_team_scores(conn)?;
     Ok(())
 }
 
@@ -438,13 +452,13 @@ fn insert_challenge(
     slug_to_id: &HashMap<String, i64>,
 ) -> Result<i64, AppError> {
     let now = chrono::Utc::now().timestamp();
-    let (flag_hash, flag_salt) = stored_flag(challenge);
+    let (flag_hash, flag_salt, flag_ciphertext) = stored_flag(conn, challenge)?;
     conn.execute(
         "INSERT INTO challenges (
             slug, title, description, category, flag_hash, flag_salt, flag_type,
             flag_case_sensitive, points, max_points, min_points, decay_rate,
-            author, tags, unlock_requires, is_hidden, created_at
-         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+            author, tags, unlock_requires, is_hidden, created_at, flag_ciphertext
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
         params![
             challenge.slug,
             challenge.title,
@@ -466,6 +480,7 @@ fn insert_challenge(
                 .and_then(|slug| slug_to_id.get(slug).copied()),
             challenge.is_hidden as i64,
             now,
+            flag_ciphertext,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -477,13 +492,19 @@ fn update_challenge(
     id: i64,
     slug_to_id: &HashMap<String, i64>,
 ) -> Result<(), AppError> {
-    let (flag_hash, flag_salt) = stored_flag(challenge);
+    let (flag_hash, flag_salt, flag_ciphertext) = stored_flag(conn, challenge)?;
     conn.execute(
         "UPDATE challenges SET
             title = ?1, description = ?2, category = ?3, flag_hash = ?4, flag_salt = ?5,
             flag_type = ?6, flag_case_sensitive = ?7, points = ?8, max_points = ?9,
             min_points = ?10, decay_rate = ?11, author = ?12, tags = ?13,
-            unlock_requires = ?14, is_hidden = ?15
+            unlock_requires = ?14, is_hidden = ?15,
+            -- keep the old ciphertext only while the flag hash is unchanged
+            flag_ciphertext = CASE
+                WHEN ?17 IS NOT NULL THEN ?17
+                WHEN flag_hash = ?4 THEN flag_ciphertext
+                ELSE NULL
+            END
          WHERE id = ?16",
         params![
             challenge.title,
@@ -505,6 +526,7 @@ fn update_challenge(
                 .and_then(|slug| slug_to_id.get(slug).copied()),
             challenge.is_hidden as i64,
             id,
+            flag_ciphertext,
         ],
     )?;
     Ok(())
@@ -546,6 +568,37 @@ fn import_hints(conn: &DbConn, challenge: &ExportChallenge, id: i64) -> Result<(
     Ok(())
 }
 
+/// Overwrite a challenge's hints while keeping hint ids (and therefore team
+/// unlocks) stable: hints are matched by `sort_order`, updated in place, new
+/// ones inserted, and removed ones deleted together with their unlocks.
+fn sync_hints(conn: &DbConn, challenge: &ExportChallenge, id: i64) -> Result<(), AppError> {
+    let mut existing: Vec<(i64, i64)> = {
+        let mut stmt =
+            conn.prepare("SELECT id, sort_order FROM hints WHERE challenge_id = ?1 ORDER BY id")?;
+        stmt.query_map(params![id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?
+    };
+    for hint in &challenge.hints {
+        if let Some(pos) = existing.iter().position(|(_, order)| *order == hint.order) {
+            let (hint_id, _) = existing.remove(pos);
+            conn.execute(
+                "UPDATE hints SET content = ?1, cost_points = ?2 WHERE id = ?3",
+                params![hint.content, hint.cost, hint_id],
+            )?;
+        } else {
+            conn.execute(
+                "INSERT INTO hints (challenge_id, content, cost_points, sort_order)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![id, hint.content, hint.cost, hint.order],
+            )?;
+        }
+    }
+    for (hint_id, _) in existing {
+        Hint::delete(conn, hint_id)?;
+    }
+    Ok(())
+}
+
 fn import_files(
     conn: &DbConn,
     challenge: &ExportChallenge,
@@ -554,7 +607,23 @@ fn import_files(
     result: &mut ImportResult,
 ) -> Result<(), AppError> {
     for file in &challenge.files {
-        let storage_path = format!("{}/{}", challenge.slug, file.filename);
+        if let Some(url) = file
+            .url
+            .as_deref()
+            .filter(|u| is_absolute_attachment_url(u.trim()))
+        {
+            conn.execute(
+                "INSERT INTO files (challenge_id, filename, storage_path, size_bytes, sha256)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, file.filename, url.trim(), file.size_bytes, file.sha256],
+            )?;
+            continue;
+        }
+        result.attachment_warnings.push(format!(
+            "attachment {} for {} has no absolute URL; set one in the admin UI",
+            file.filename, challenge.slug
+        ));
+        let mut storage_path = format!("{}/{}", challenge.slug, file.filename);
         if let Some(data) = &file.data {
             if let Some(dir) = attachments_dir {
                 let bytes = BASE64
@@ -575,7 +644,9 @@ fn import_files(
             }
         } else if let Some(dir) = attachments_dir {
             let candidate = dir.join(&storage_path);
-            if !candidate.exists() && !dir.join(&file.filename).exists() {
+            if !candidate.exists() && dir.join(&file.filename).exists() {
+                storage_path = file.filename.clone();
+            } else if !candidate.exists() {
                 result.attachment_warnings.push(format!(
                     "attachment {} for {} not found",
                     file.filename, challenge.slug
@@ -615,11 +686,15 @@ fn challenge_matches_existing(
     let hints = export_hints(conn, existing.id)?;
     let files = ChallengeFile::list_by_challenge(conn, existing.id)?
         .into_iter()
-        .map(|file| ExportFile {
-            filename: file.filename,
-            sha256: file.sha256,
-            size_bytes: file.size_bytes,
-            data: None,
+        .map(|file| {
+            let url = is_absolute_attachment_url(&file.storage_path).then_some(file.storage_path);
+            ExportFile {
+                filename: file.filename,
+                sha256: file.sha256,
+                size_bytes: file.size_bytes,
+                url,
+                data: None,
+            }
         })
         .collect::<Vec<_>>();
 
@@ -650,33 +725,48 @@ fn flag_matches(challenge: &ExportChallenge, existing: &Challenge) -> bool {
     if challenge.flag_type == "regex" {
         existing.flag_hash == challenge.flag
     } else {
-        auth::verify_flag(&challenge.flag, &existing.flag_hash, &existing.flag_salt)
+        auth::verify_flag(
+            &challenge.flag,
+            &existing.flag_hash,
+            &existing.flag_salt,
+            existing.flag_case_sensitive,
+        )
     }
 }
 
 fn files_match_ignoring_data(a: &[ExportFile], b: &[ExportFile]) -> bool {
     let mut a = a
         .iter()
-        .map(|f| (&f.filename, &f.sha256, f.size_bytes))
+        .map(|f| (&f.filename, &f.sha256, f.size_bytes, &f.url))
         .collect::<Vec<_>>();
     let mut b = b
         .iter()
-        .map(|f| (&f.filename, &f.sha256, f.size_bytes))
+        .map(|f| (&f.filename, &f.sha256, f.size_bytes, &f.url))
         .collect::<Vec<_>>();
     a.sort();
     b.sort();
     a == b
 }
 
-fn stored_flag(challenge: &ExportChallenge) -> (String, String) {
+/// Hash, salt and (when the bundle carries a plaintext static flag) the
+/// reversible ciphertext used for admin reveal.
+fn stored_flag(
+    conn: &DbConn,
+    challenge: &ExportChallenge,
+) -> Result<(String, String, Option<String>), AppError> {
+    // Encryption is best-effort; see flag_cipher::try_encrypt.
     if let (Some(hash), Some(salt)) = (&challenge.flag_hash, &challenge.flag_salt) {
-        return (hash.clone(), salt.clone());
+        return Ok((hash.clone(), salt.clone(), None));
     }
     if challenge.flag_type == "regex" {
-        return (challenge.flag.clone(), String::new());
+        return Ok((challenge.flag.clone(), String::new(), None));
     }
     let salt = generate_salt();
-    (auth::hash_flag(&challenge.flag, &salt), salt)
+    Ok((
+        auth::hash_flag(&challenge.flag, &salt, challenge.flag_case_sensitive),
+        salt,
+        crate::flag_cipher::try_encrypt(conn, challenge.flag.trim()),
+    ))
 }
 
 fn ctfd_value_to_bundle(value: &serde_json::Value) -> Result<ExportBundle, AppError> {
@@ -776,6 +866,7 @@ fn ctfd_files(value: Option<&serde_json::Value>) -> Vec<ExportFile> {
     ctfd_strings(value)
         .into_iter()
         .map(|filename| ExportFile {
+            url: is_absolute_attachment_url(&filename).then(|| filename.clone()),
             filename: PathBuf::from(&filename)
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -894,6 +985,9 @@ pub fn export_zip(conn: &DbConn, config: &Config) -> Result<Vec<u8>, AppError> {
 
     for challenge in &Challenge::list_all(conn)? {
         for file in ChallengeFile::list_by_challenge(conn, challenge.id)? {
+            if is_absolute_attachment_url(&file.storage_path) {
+                continue;
+            }
             let disk_path = stored_file_path(config, &file.storage_path);
             if let Ok(bytes) = fs::read(&disk_path) {
                 let entry = format!("{}/{}", challenge.slug, file.filename);
@@ -1036,5 +1130,194 @@ mod tests {
         let second = import(&conn, &bundle(), None, &options).expect("second import");
         assert_eq!(second.challenges_created, 0);
         assert_eq!(second.challenges_skipped, 1);
+    }
+
+    #[test]
+    fn import_stores_absolute_urls_and_warns_on_relative_files() {
+        let conn = test_conn();
+        let mut bundle = bundle();
+        bundle.challenges[0].files = vec![
+            ExportFile {
+                filename: "dump.pcap".to_string(),
+                sha256: String::new(),
+                size_bytes: 0,
+                url: Some("https://files.example.com/dump.pcap".to_string()),
+                data: None,
+            },
+            ExportFile {
+                filename: "local.bin".to_string(),
+                sha256: String::new(),
+                size_bytes: 0,
+                url: None,
+                data: None,
+            },
+        ];
+        let result = import(
+            &conn,
+            &bundle,
+            None,
+            &ImportOptions {
+                overwrite: false,
+                dry_run: false,
+            },
+        )
+        .expect("import");
+
+        let mut stmt = conn
+            .prepare("SELECT filename, storage_path FROM files ORDER BY filename")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "dump.pcap".to_string(),
+                    "https://files.example.com/dump.pcap".to_string()
+                ),
+                ("local.bin".to_string(), "jwt-jockey/local.bin".to_string()),
+            ]
+        );
+        assert!(
+            result
+                .attachment_warnings
+                .iter()
+                .any(|w| w.contains("local.bin") && w.contains("no absolute URL"))
+        );
+        assert!(
+            !result
+                .attachment_warnings
+                .iter()
+                .any(|w| w.contains("dump.pcap"))
+        );
+
+        let exported = export(&conn, &Config::default(), true).unwrap();
+        let url_file = exported.challenges[0]
+            .files
+            .iter()
+            .find(|f| f.filename == "dump.pcap")
+            .unwrap();
+        assert_eq!(
+            url_file.url.as_deref(),
+            Some("https://files.example.com/dump.pcap")
+        );
+        assert!(url_file.data.is_none());
+    }
+
+    #[test]
+    fn overwrite_import_keeps_hint_ids_and_unlocks() {
+        let conn = test_conn();
+        let mut original = bundle();
+        original.challenges[0].hints.push(ExportHint {
+            order: 2,
+            cost: 40,
+            content: "second".to_string(),
+        });
+        let options = ImportOptions {
+            overwrite: true,
+            dry_run: false,
+        };
+        import(&conn, &original, None, &options).expect("first import");
+        let hint_id = |order: i64| -> i64 {
+            conn.query_row(
+                "SELECT id FROM hints WHERE sort_order = ?1",
+                params![order],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let (first_id, second_id) = (hint_id(1), hint_id(2));
+        conn.execute(
+            "INSERT INTO teams (id, name, invite_code, score) VALUES (1, 'T', 'TCODE001', 0)",
+            [],
+        )
+        .unwrap();
+        Hint::unlock(&conn, 1, first_id, 25, 10).unwrap();
+        Hint::unlock(&conn, 1, second_id, 40, 11).unwrap();
+
+        let mut changed = bundle();
+        changed.challenges[0].hints[0].content = "reworded".to_string();
+        let result = import(&conn, &changed, None, &options).expect("overwrite import");
+        assert_eq!(result.challenges_overwritten, 1);
+
+        assert_eq!(hint_id(1), first_id);
+        let content: String = conn
+            .query_row(
+                "SELECT content FROM hints WHERE id = ?1",
+                params![first_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(content, "reworded");
+        let unlocks: Vec<i64> = {
+            let mut stmt = conn.prepare("SELECT hint_id FROM hint_unlocks").unwrap();
+            stmt.query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(unlocks, vec![first_id]);
+        let score: i64 = conn
+            .query_row("SELECT score FROM teams WHERE id = 1", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(score, -25);
+    }
+
+    fn ciphertext(conn: &DbConn) -> Option<String> {
+        conn.query_row("SELECT flag_ciphertext FROM challenges", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn import_encrypts_plaintext_flags_and_never_leaves_stale_ciphertext() {
+        let conn = test_conn();
+        let options = ImportOptions {
+            overwrite: true,
+            dry_run: false,
+        };
+        import(&conn, &bundle(), None, &options).expect("import");
+        let first = ciphertext(&conn).expect("plaintext flag encrypted");
+        assert_eq!(
+            crate::flag_cipher::decrypt(&conn, &first).unwrap(),
+            "flag{ok}"
+        );
+
+        // Re-import of a FeralCTF export (hash only, same flag): ciphertext kept.
+        let exported = export(&conn, &Config::default(), false).unwrap();
+        let mut changed = exported.clone();
+        changed.challenges[0].title = "Renamed".to_string();
+        import(&conn, &changed, None, &options).expect("overwrite with hash");
+        assert_eq!(ciphertext(&conn).as_deref(), Some(first.as_str()));
+        assert!(!serde_json::to_string(&exported).unwrap().contains(&first));
+
+        // Overwrite with a different hash and no plaintext: ciphertext cleared.
+        let mut other = exported;
+        other.challenges[0].flag_hash = Some(auth::hash_flag("flag{new}", "salt", false));
+        other.challenges[0].flag_salt = Some("salt".to_string());
+        import(&conn, &other, None, &options).expect("overwrite with new hash");
+        assert_eq!(ciphertext(&conn), None);
+
+        // Regex flags are stored as readable patterns, not encrypted.
+        let mut regex = bundle();
+        regex.challenges[0].slug = "regex-one".to_string();
+        regex.challenges[0].title = "Regex One".to_string();
+        regex.challenges[0].flag_type = "regex".to_string();
+        regex.challenges[0].flag = r"^flag\{\d+\}$".to_string();
+        import(&conn, &regex, None, &options).expect("regex import");
+        let regex_ciphertext: Option<String> = conn
+            .query_row(
+                "SELECT flag_ciphertext FROM challenges WHERE slug = 'regex-one'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(regex_ciphertext, None);
     }
 }

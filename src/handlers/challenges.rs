@@ -88,6 +88,7 @@ pub async fn get_challenge(
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
     let challenge = visible_challenge(&conn, id)?;
+    ensure_unlocked(&conn, &challenge, team_id)?;
     let public = challenge.to_public(&conn, team_id)?;
     let hints = Hint::list_public_for_team(&conn, id, team_id)?;
     let files = ChallengeFile::list_by_challenge(&conn, id)?;
@@ -123,7 +124,9 @@ pub async fn submit_flag(
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
+    ensure_competition_running(&state, &conn, &user)?;
     let challenge = visible_challenge(&conn, id)?;
+    ensure_unlocked(&conn, &challenge, team_id)?;
 
     if Challenge::is_solved_by_team(&conn, id, team_id)? {
         Submission::create(&conn, team_id, user.id, id, &submitted, false, Some(&ip))?;
@@ -186,14 +189,7 @@ pub async fn submit_flag(
             first_blood,
         });
 
-    if let Ok(sb) = crate::models::scoreboard::ScoreboardState::build(&conn) {
-        state
-            .ws_hub
-            .broadcast(crate::handlers::ws::WsEvent::ScoreUpdate {
-                scoreboard: sb.teams,
-                total_visible_points: sb.total_visible_points,
-            });
-    }
+    crate::handlers::scoreboard::broadcast_score_update(&state, &conn);
 
     Ok(Json(SubmitResponse {
         correct: true,
@@ -215,7 +211,9 @@ pub async fn unlock_hint(
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
-    let _challenge = visible_challenge(&conn, challenge_id)?;
+    ensure_competition_running(&state, &conn, &user)?;
+    let challenge = visible_challenge(&conn, challenge_id)?;
+    ensure_unlocked(&conn, &challenge, team_id)?;
     let hint = Hint::find_by_id(&conn, hint_id)?
         .ok_or_else(|| AppError::NotFound("hint not found".to_string()))?;
     if hint.challenge_id != challenge_id {
@@ -231,12 +229,35 @@ pub async fn unlock_hint(
         }));
     }
 
+    if Challenge::is_solved_by_team(&conn, challenge_id, team_id)? {
+        return Err(AppError::BadRequest(
+            "challenge already solved; hints are no longer needed".to_string(),
+        ));
+    }
+    // Hints may not push a team below zero (free hints are always allowed).
+    let current_score = team_score(&conn, team_id)?;
+    if hint.cost_points > 0 && hint.cost_points > current_score {
+        return Err(AppError::BadRequest(format!(
+            "not enough points: hint costs {}, team has {current_score}",
+            hint.cost_points
+        )));
+    }
+
     let now = chrono::Utc::now().timestamp();
-    Hint::unlock(&conn, team_id, hint_id, hint.cost_points, now)?;
+    if !Hint::unlock(&conn, team_id, hint_id, hint.cost_points, now)? {
+        // A concurrent request unlocked it first; don't charge twice.
+        return Ok(Json(HintUnlockResponse {
+            unlocked: true,
+            points_deducted: 0,
+            new_score: current_score,
+            content: Some(hint.content),
+        }));
+    }
     scoring::recalculate_all_team_scores(&conn)?;
     let new_score = team_score(&conn, team_id)?;
     insert_score_history(&conn, team_id, new_score, now)?;
     state.cache.invalidate_scoreboard();
+    crate::handlers::scoreboard::broadcast_score_update(&state, &conn);
 
     Ok(Json(HintUnlockResponse {
         unlocked: true,
@@ -278,15 +299,41 @@ fn visible_challenge(conn: &crate::db::DbConn, id: i64) -> Result<Challenge, App
     Ok(challenge)
 }
 
+/// Admins may test challenges at any time; players only while it runs.
+fn ensure_competition_running(
+    state: &AppState,
+    conn: &crate::db::DbConn,
+    user: &User,
+) -> Result<(), AppError> {
+    if user.role == "admin" {
+        return Ok(());
+    }
+    crate::competition::status(conn, &state.config.competition)?.ensure_running()
+}
+
+fn ensure_unlocked(
+    conn: &crate::db::DbConn,
+    challenge: &Challenge,
+    team_id: i64,
+) -> Result<(), AppError> {
+    if challenge.is_locked_for_team(conn, team_id)? {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
+}
+
 fn verify_submission(challenge: &Challenge, submitted: &str) -> Result<bool, AppError> {
     match challenge.flag_type.as_str() {
-        "regex" => regex::Regex::new(&challenge.flag_hash)
+        "regex" => regex::RegexBuilder::new(&challenge.flag_hash)
+            .case_insensitive(!challenge.flag_case_sensitive)
+            .build()
             .map(|pattern| pattern.is_match(submitted))
             .map_err(|err| AppError::BadRequest(format!("invalid regex flag pattern: {err}"))),
         _ => Ok(auth::verify_flag(
             submitted,
             &challenge.flag_hash,
             &challenge.flag_salt,
+            challenge.flag_case_sensitive,
         )),
     }
 }
@@ -365,16 +412,24 @@ mod tests {
     }
 
     fn authed_user(state: &AppState) -> (HeaderMap, User, Team) {
+        authed_user_named(state, "solver", "Solvers")
+    }
+
+    fn authed_user_named(
+        state: &AppState,
+        username: &str,
+        team_name: &str,
+    ) -> (HeaderMap, User, Team) {
         let conn = state.db.get().unwrap();
         let req = RegisterRequest {
-            username: "solver".to_string(),
+            username: username.to_string(),
             email: None,
             password: "password123".to_string(),
             team_name: None,
             invite_code: None,
         };
         let user = User::create(&conn, &req, "hash").unwrap();
-        let team = Team::create(&conn, "Solvers").unwrap();
+        let team = Team::create(&conn, team_name).unwrap();
         Team::add_member(&conn, team.id, user.id).unwrap();
         let user = User::find_by_id(&conn, user.id).unwrap().unwrap();
         drop(conn);
@@ -410,7 +465,7 @@ mod tests {
         let stored_flag = if flag_type == "regex" {
             flag.to_string()
         } else {
-            auth::hash_flag(flag, salt)
+            auth::hash_flag(flag, salt, false)
         };
         conn.execute(
             "INSERT INTO challenges (
@@ -601,26 +656,29 @@ mod tests {
         }
     }
 
+    fn insert_hint(state: &AppState, challenge_id: i64, content: &str, cost: i64) -> i64 {
+        let conn = state.db.get().unwrap();
+        conn.execute(
+            "INSERT INTO hints (challenge_id, content, cost_points, sort_order)
+             VALUES (?1, ?2, ?3, 1)",
+            rusqlite::params![challenge_id, content, cost],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
     #[tokio::test]
     async fn regex_flags_and_hint_unlock_work() {
         let state = test_state();
         let (headers, _user, team) = authed_user(&state);
-        let challenge_id = insert_challenge(&state, "regex", r"^flag\{[0-9]+\}$", "regex", 0);
-        let hint_id = {
-            let conn = state.db.get().unwrap();
-            conn.execute(
-                "INSERT INTO hints (challenge_id, content, cost_points, sort_order)
-                 VALUES (?1, 'count it', 25, 1)",
-                rusqlite::params![challenge_id],
-            )
-            .unwrap();
-            conn.last_insert_rowid()
-        };
+        let regex_id = insert_challenge(&state, "regex", r"^flag\{[0-9]+\}$", "regex", 0);
+        let other_id = insert_challenge(&state, "other", "flag{other}", "static", 0);
+        let hint_id = insert_hint(&state, other_id, "count it", 25);
 
         let Json(response) = submit_flag(
             State(state.clone()),
             headers.clone(),
-            Path(challenge_id),
+            Path(regex_id),
             Json(SubmitFlagRequest {
                 flag: "flag{123}".to_string(),
             }),
@@ -632,7 +690,7 @@ mod tests {
         let Json(unlocked) = unlock_hint(
             State(state.clone()),
             headers.clone(),
-            Path((challenge_id, hint_id)),
+            Path((other_id, hint_id)),
         )
         .await
         .unwrap();
@@ -640,12 +698,274 @@ mod tests {
         assert_eq!(unlocked.content.as_deref(), Some("count it"));
         assert_eq!(unlocked.new_score, 75);
 
-        let Json(again) = unlock_hint(State(state), headers, Path((challenge_id, hint_id)))
+        let Json(again) = unlock_hint(State(state), headers, Path((other_id, hint_id)))
             .await
             .unwrap();
         assert_eq!(again.points_deducted, 0);
         assert_eq!(again.new_score, 75);
 
         assert_eq!(team.name, "Solvers");
+    }
+
+    #[tokio::test]
+    async fn hint_unlock_rejected_after_solve() {
+        let state = test_state();
+        let (headers, _user, _team) = authed_user(&state);
+        let challenge_id = insert_challenge(&state, "solved", "flag{ok}", "static", 0);
+        let hint_id = insert_hint(&state, challenge_id, "late", 10);
+        let Json(solved) = submit_flag(
+            State(state.clone()),
+            headers.clone(),
+            Path(challenge_id),
+            Json(SubmitFlagRequest {
+                flag: "flag{ok}".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(solved.correct);
+
+        let err = unlock_hint(State(state.clone()), headers, Path((challenge_id, hint_id)))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+        let conn = state.db.get().unwrap();
+        let unlocks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM hint_unlocks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(unlocks, 0);
+    }
+
+    #[tokio::test]
+    async fn hint_unlock_cannot_go_negative_but_free_hints_work() {
+        let state = test_state();
+        let (headers, _user, team) = authed_user(&state);
+        let challenge_id = insert_challenge(&state, "pricey", "flag{ok}", "static", 0);
+        let paid = insert_hint(&state, challenge_id, "paid", 50);
+        let free = insert_hint(&state, challenge_id, "free", 0);
+
+        let err = unlock_hint(
+            State(state.clone()),
+            headers.clone(),
+            Path((challenge_id, paid)),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(ref msg) if msg.contains("not enough points")));
+
+        let Json(free_unlock) =
+            unlock_hint(State(state.clone()), headers, Path((challenge_id, free)))
+                .await
+                .unwrap();
+        assert_eq!(free_unlock.content.as_deref(), Some("free"));
+        assert_eq!(free_unlock.new_score, 0);
+
+        let conn = state.db.get().unwrap();
+        assert_eq!(team_score(&conn, team.id).unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn unlocked_hint_content_only_after_unlock() {
+        let state = test_state();
+        let (headers, _user, _team) = authed_user(&state);
+        let challenge_id = insert_challenge(&state, "detail", "flag{ok}", "static", 0);
+        let hint_id = insert_hint(&state, challenge_id, "the secret", 0);
+
+        let Json(before) = get_challenge(State(state.clone()), headers.clone(), Path(challenge_id))
+            .await
+            .unwrap();
+        assert!(!before.hints[0].unlocked);
+        assert!(
+            serde_json::to_string(&before)
+                .unwrap()
+                .find("the secret")
+                .is_none()
+        );
+
+        let _ = unlock_hint(
+            State(state.clone()),
+            headers.clone(),
+            Path((challenge_id, hint_id)),
+        )
+        .await
+        .unwrap();
+        let Json(after) = get_challenge(State(state), headers, Path(challenge_id))
+            .await
+            .unwrap();
+        assert!(after.hints[0].unlocked);
+        assert_eq!(after.hints[0].content.as_deref(), Some("the secret"));
+    }
+
+    #[test]
+    fn concurrent_unlock_insert_is_charged_once() {
+        let state = test_state();
+        let conn = state.db.get().unwrap();
+        assert!(Hint::unlock(&conn, 1, 1, 10, 1).unwrap());
+        assert!(!Hint::unlock(&conn, 1, 1, 10, 2).unwrap());
+        let total: i64 = conn
+            .query_row("SELECT SUM(points_deducted) FROM hint_unlocks", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(total, 10);
+    }
+
+    #[tokio::test]
+    async fn locked_challenge_is_forbidden_until_prerequisite_solved() {
+        let state = test_state();
+        let (headers, _user, _team) = authed_user(&state);
+        let first = insert_challenge(&state, "first", "flag{one}", "static", 0);
+        let second = insert_challenge(&state, "second", "flag{two}", "static", 0);
+        let hint_id = insert_hint(&state, second, "later", 0);
+        {
+            let conn = state.db.get().unwrap();
+            conn.execute(
+                "UPDATE challenges SET unlock_requires = ?1 WHERE id = ?2",
+                rusqlite::params![first, second],
+            )
+            .unwrap();
+        }
+
+        let Json(list) = list_challenges(State(state.clone()), headers.clone())
+            .await
+            .unwrap();
+        let locked = list.challenges.iter().find(|c| c.id == second).unwrap();
+        assert!(locked.locked);
+        assert!(locked.description.is_empty());
+
+        assert!(matches!(
+            get_challenge(State(state.clone()), headers.clone(), Path(second)).await,
+            Err(AppError::Forbidden)
+        ));
+        assert!(matches!(
+            submit_flag(
+                State(state.clone()),
+                headers.clone(),
+                Path(second),
+                Json(SubmitFlagRequest {
+                    flag: "flag{two}".to_string()
+                }),
+            )
+            .await,
+            Err(AppError::Forbidden)
+        ));
+        assert!(matches!(
+            unlock_hint(
+                State(state.clone()),
+                headers.clone(),
+                Path((second, hint_id))
+            )
+            .await,
+            Err(AppError::Forbidden)
+        ));
+
+        let Json(solved) = submit_flag(
+            State(state.clone()),
+            headers.clone(),
+            Path(first),
+            Json(SubmitFlagRequest {
+                flag: "flag{one}".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(solved.correct);
+        let Json(detail) = get_challenge(State(state), headers, Path(second))
+            .await
+            .unwrap();
+        assert!(!detail.challenge.locked);
+        assert_eq!(detail.challenge.description, "desc");
+    }
+
+    #[tokio::test]
+    async fn case_sensitive_regex_and_static_flags() {
+        let state = test_state();
+        let (headers, _user, _team) = authed_user(&state);
+        let regex_id = insert_challenge(&state, "cs-regex", r"^flag\{Abc\}$", "regex", 0);
+        let static_id = insert_challenge(&state, "cs-static", "unused", "static", 0);
+        {
+            let conn = state.db.get().unwrap();
+            conn.execute(
+                "UPDATE challenges SET flag_case_sensitive = 1, flag_hash = ?1 WHERE id = ?2",
+                rusqlite::params![auth::hash_flag("flag{Xyz}", "salt", true), static_id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE challenges SET flag_case_sensitive = 1 WHERE id = ?1",
+                rusqlite::params![regex_id],
+            )
+            .unwrap();
+        }
+        for (id, wrong, right) in [
+            (regex_id, "flag{abc}", "flag{Abc}"),
+            (static_id, "flag{xyz}", "flag{Xyz}"),
+        ] {
+            let Json(miss) = submit_flag(
+                State(state.clone()),
+                headers.clone(),
+                Path(id),
+                Json(SubmitFlagRequest {
+                    flag: wrong.to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+            assert!(!miss.correct, "{wrong} should not match");
+            let Json(hit) = submit_flag(
+                State(state.clone()),
+                headers.clone(),
+                Path(id),
+                Json(SubmitFlagRequest {
+                    flag: right.to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+            assert!(hit.correct, "{right} should match");
+        }
+    }
+
+    #[tokio::test]
+    async fn submissions_and_unlocks_blocked_after_end() {
+        let state = test_state();
+        let (headers, _user, _team) = authed_user(&state);
+        let challenge_id = insert_challenge(&state, "ended", "flag{ok}", "static", 0);
+        let hint_id = insert_hint(&state, challenge_id, "free", 0);
+        {
+            let conn = state.db.get().unwrap();
+            crate::competition::end(&conn, 1).unwrap();
+        }
+        let err = submit_flag(
+            State(state.clone()),
+            headers.clone(),
+            Path(challenge_id),
+            Json(SubmitFlagRequest {
+                flag: "flag{ok}".to_string(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(ref m) if m.contains("ended")));
+        let err = unlock_hint(State(state.clone()), headers, Path((challenge_id, hint_id)))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(ref m) if m.contains("ended")));
+
+        {
+            let conn = state.db.get().unwrap();
+            crate::competition::start(&conn, 2).unwrap();
+        }
+        let (headers, _user, _team) = authed_user_named(&state, "solver2", "Solvers2");
+        let Json(ok) = submit_flag(
+            State(state),
+            headers,
+            Path(challenge_id),
+            Json(SubmitFlagRequest {
+                flag: "flag{ok}".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(ok.correct);
     }
 }

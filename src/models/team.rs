@@ -57,6 +57,38 @@ impl Team {
         Ok(())
     }
 
+    pub fn member_count(conn: &DbConn, team_id: i64) -> Result<i64, AppError> {
+        let n = conn.query_row(
+            "SELECT COUNT(*) FROM users WHERE team_id = ?1",
+            rusqlite::params![team_id],
+            |row| row.get(0),
+        )?;
+        Ok(n)
+    }
+
+    /// Fails when the team already has `max_size` members.
+    pub fn ensure_has_room(conn: &DbConn, team_id: i64, max_size: u32) -> Result<(), AppError> {
+        if Self::member_count(conn, team_id)? >= i64::from(max_size) {
+            return Err(AppError::BadRequest(format!(
+                "team is full (max {max_size} members)"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn find_by_name(conn: &DbConn, name: &str) -> Result<Option<Self>, AppError> {
+        let result = conn.query_row(
+            "SELECT id, name, invite_code, score, last_solve_at, is_disqualified FROM teams WHERE name = ?1",
+            rusqlite::params![name],
+            Self::from_row,
+        );
+        match result {
+            Ok(t) => Ok(Some(t)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AppError::Database(e)),
+        }
+    }
+
     pub fn update_score(
         conn: &DbConn,
         team_id: i64,

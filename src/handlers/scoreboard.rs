@@ -29,9 +29,34 @@ pub struct TeamSolve {
 }
 
 #[derive(Debug, Serialize)]
+pub struct TeamHintUnlock {
+    pub challenge_id: i64,
+    pub challenge_title: String,
+    pub hint_id: i64,
+    pub points_deducted: i64,
+    pub unlocked_at: i64,
+}
+
+/// Team as shown on a profile. `invite_code` is only present for members of
+/// the team and for admins.
+#[derive(Debug, Serialize)]
+pub struct TeamProfileInfo {
+    pub id: i64,
+    pub name: String,
+    pub score: i64,
+    pub last_solve_at: Option<i64>,
+    pub is_disqualified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invite_code: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct TeamProfile {
-    pub team: Team,
+    pub team: TeamProfileInfo,
     pub solve_history: Vec<TeamSolve>,
+    pub hint_history: Vec<TeamHintUnlock>,
+    pub hints_used: i64,
+    pub first_bloods: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,31 +69,118 @@ pub struct JoinTeamRequest {
     pub invite_code: String,
 }
 
-pub async fn get_scoreboard(State(state): State<AppState>) -> HandlerResult<Json<ScoreboardState>> {
+#[derive(Debug, Serialize)]
+pub struct Announcement {
+    pub id: i64,
+    pub title: String,
+    pub body: String,
+    pub challenge_id: Option<i64>,
+    pub created_at: i64,
+}
+
+/// The moment public scores are frozen at, if a freeze is in effect.
+fn active_freeze(state: &AppState, conn: &crate::db::DbConn) -> Result<Option<i64>, AppError> {
+    let status = crate::competition::status(conn, &state.config.competition)?;
+    let now = chrono::Utc::now().timestamp();
+    Ok(status.frozen_at.filter(|_| status.is_frozen(now)))
+}
+
+fn is_admin(user: Option<&User>) -> bool {
+    user.is_some_and(|user| user.role == "admin")
+}
+
+/// Scoreboard everyone but admins sees: frozen while a freeze is active.
+pub(crate) fn public_scoreboard(
+    state: &AppState,
+    conn: &crate::db::DbConn,
+) -> Result<ScoreboardState, AppError> {
+    match active_freeze(state, conn)? {
+        Some(at) => ScoreboardState::build_as_of(conn, at),
+        None => state.cache.get_or_build_scoreboard(conn),
+    }
+}
+
+pub async fn get_scoreboard(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> HandlerResult<Json<ScoreboardState>> {
+    let viewer = current_user(&state, &headers).ok();
     let conn = state
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
-    let scoreboard = state.cache.get_or_build_scoreboard(&conn)?;
+    let scoreboard = if is_admin(viewer.as_ref()) {
+        state.cache.get_or_build_scoreboard(&conn)?
+    } else {
+        public_scoreboard(&state, &conn)?
+    };
     Ok(Json(scoreboard))
 }
 
-pub async fn get_scoreboard_graph(
+pub async fn get_competition(
     State(state): State<AppState>,
-) -> HandlerResult<Json<Vec<TeamGraphData>>> {
+) -> HandlerResult<Json<crate::competition::CompetitionStatus>> {
+    let conn = state
+        .db
+        .get()
+        .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
+    Ok(Json(crate::competition::status(
+        &conn,
+        &state.config.competition,
+    )?))
+}
+
+pub async fn list_announcements(
+    State(state): State<AppState>,
+) -> HandlerResult<Json<Vec<Announcement>>> {
     let conn = state
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
     let mut stmt = conn.prepare(
+        "SELECT id, title, body, challenge_id, created_at
+         FROM announcements WHERE is_visible = 1
+         ORDER BY created_at DESC, id DESC
+         LIMIT 50",
+    )?;
+    let announcements = stmt
+        .query_map([], |row| {
+            Ok(Announcement {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                body: row.get(2)?,
+                challenge_id: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Json(announcements))
+}
+
+pub async fn get_scoreboard_graph(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> HandlerResult<Json<Vec<TeamGraphData>>> {
+    let viewer = current_user(&state, &headers).ok();
+    let conn = state
+        .db
+        .get()
+        .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
+    let cutoff = if is_admin(viewer.as_ref()) {
+        None
+    } else {
+        active_freeze(&state, &conn)?
+    };
+    let mut stmt = conn.prepare(
         "SELECT t.id, t.name, sh.recorded_at, sh.score
          FROM teams t
          JOIN score_history sh ON sh.team_id = t.id
+         WHERE ?1 IS NULL OR sh.recorded_at <= ?1
          ORDER BY t.id, sh.recorded_at",
     )?;
 
     let mut by_team: BTreeMap<i64, TeamGraphData> = BTreeMap::new();
-    for row in stmt.query_map([], |row| {
+    for row in stmt.query_map(rusqlite::params![cutoff], |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
@@ -93,18 +205,59 @@ pub async fn get_scoreboard_graph(
 
 pub async fn get_team_profile(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(team_id): Path<i64>,
 ) -> HandlerResult<Json<TeamProfile>> {
+    // Anonymous callers are allowed; only members and admins see the invite code.
+    let viewer = current_user(&state, &headers).ok();
+    let can_see_invite = viewer
+        .as_ref()
+        .is_some_and(|user| user.role == "admin" || user.team_id == Some(team_id));
     let conn = state
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
-    let team = Team::find_by_id(&conn, team_id)?
+    let mut team = Team::find_by_id(&conn, team_id)?
         .ok_or_else(|| AppError::NotFound("team not found".to_string()))?;
-    let solve_history = team_solve_history(&conn, team_id)?;
+    let mut solve_history = team_solve_history(&conn, team_id)?;
+    let mut hint_history = team_hint_history(&conn, team_id)?;
+    // During a freeze other teams only see this team as it stood at the freeze.
+    if !can_see_invite && let Some(at) = active_freeze(&state, &conn)? {
+        solve_history.retain(|solve| solve.solved_at <= at);
+        hint_history.retain(|unlock| unlock.unlocked_at <= at);
+        if let Some(frozen) = ScoreboardState::build_as_of(&conn, at)?
+            .teams
+            .into_iter()
+            .find(|entry| entry.team_id == team_id)
+        {
+            team.score = frozen.score;
+            team.last_solve_at = frozen.last_solve_at;
+        }
+    }
+    let first_bloods = conn.query_row(
+        "SELECT COUNT(*) FROM solves s
+         WHERE s.team_id = ?1
+           AND NOT EXISTS (
+               SELECT 1 FROM solves o
+               WHERE o.challenge_id = s.challenge_id
+                 AND (o.solved_at < s.solved_at OR (o.solved_at = s.solved_at AND o.id < s.id))
+           )",
+        rusqlite::params![team_id],
+        |row| row.get(0),
+    )?;
     Ok(Json(TeamProfile {
-        team,
+        team: TeamProfileInfo {
+            id: team.id,
+            name: team.name,
+            score: team.score,
+            last_solve_at: team.last_solve_at,
+            is_disqualified: team.is_disqualified,
+            invite_code: can_see_invite.then_some(team.invite_code),
+        },
         solve_history,
+        hints_used: hint_history.len() as i64,
+        hint_history,
+        first_bloods,
     }))
 }
 
@@ -127,6 +280,9 @@ pub async fn create_team(
         .db
         .get()
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
+    if Team::find_by_name(&conn, request.name.trim())?.is_some() {
+        return Err(AppError::BadRequest("team name already taken".to_string()));
+    }
     let team = Team::create(&conn, request.name.trim())?;
     Team::add_member(&conn, team.id, user.id)?;
     state.cache.invalidate_scoreboard();
@@ -151,9 +307,23 @@ pub async fn join_team(
         .map_err(|err| anyhow::anyhow!("db pool: {err}"))?;
     let team = Team::find_by_invite_code(&conn, request.invite_code.trim())?
         .ok_or_else(|| AppError::BadRequest("invalid invite code".to_string()))?;
+    Team::ensure_has_room(&conn, team.id, state.config.competition.max_team_size)?;
     Team::add_member(&conn, team.id, user.id)?;
     state.cache.invalidate_scoreboard();
     Ok(Json(team))
+}
+
+/// Push the current scoreboard to every WebSocket client.
+pub(crate) fn broadcast_score_update(state: &AppState, conn: &crate::db::DbConn) {
+    state.cache.invalidate_scoreboard();
+    if let Ok(sb) = public_scoreboard(state, conn) {
+        state
+            .ws_hub
+            .broadcast(crate::handlers::ws::WsEvent::ScoreUpdate {
+                scoreboard: sb.teams,
+                total_visible_points: sb.total_visible_points,
+            });
+    }
 }
 
 pub fn snapshot_scores(conn: &crate::db::DbConn, recorded_at: i64) -> Result<usize, AppError> {
@@ -203,6 +373,32 @@ fn team_solve_history(conn: &crate::db::DbConn, team_id: i64) -> Result<Vec<Team
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(solves)
+}
+
+fn team_hint_history(
+    conn: &crate::db::DbConn,
+    team_id: i64,
+) -> Result<Vec<TeamHintUnlock>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT h.challenge_id, COALESCE(c.title, ''), hu.hint_id, hu.points_deducted, hu.unlocked_at
+         FROM hint_unlocks hu
+         JOIN hints h ON h.id = hu.hint_id
+         LEFT JOIN challenges c ON c.id = h.challenge_id
+         WHERE hu.team_id = ?1
+         ORDER BY hu.unlocked_at DESC",
+    )?;
+    let unlocks = stmt
+        .query_map(rusqlite::params![team_id], |row| {
+            Ok(TeamHintUnlock {
+                challenge_id: row.get(0)?,
+                challenge_title: row.get(1)?,
+                hint_id: row.get(2)?,
+                points_deducted: row.get(3)?,
+                unlocked_at: row.get(4)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(unlocks)
 }
 
 fn current_user(state: &AppState, headers: &HeaderMap) -> Result<User, AppError> {
@@ -302,7 +498,9 @@ mod tests {
             .unwrap();
         }
 
-        let Json(first) = get_scoreboard(State(state.clone())).await.unwrap();
+        let Json(first) = get_scoreboard(State(state.clone()), HeaderMap::new())
+            .await
+            .unwrap();
         assert_eq!(first.teams.len(), 1);
         assert!(state.cache.is_scoreboard_cached());
 
@@ -315,10 +513,14 @@ mod tests {
             .unwrap();
         }
 
-        let Json(cached) = get_scoreboard(State(state.clone())).await.unwrap();
+        let Json(cached) = get_scoreboard(State(state.clone()), HeaderMap::new())
+            .await
+            .unwrap();
         assert_eq!(cached.teams.len(), 1);
         state.cache.invalidate_scoreboard();
-        let Json(rebuilt) = get_scoreboard(State(state)).await.unwrap();
+        let Json(rebuilt) = get_scoreboard(State(state), HeaderMap::new())
+            .await
+            .unwrap();
         assert_eq!(rebuilt.teams.len(), 2);
     }
 
@@ -338,7 +540,9 @@ mod tests {
             snapshot_scores(&conn, 200).unwrap();
         }
 
-        let Json(graph) = get_scoreboard_graph(State(state)).await.unwrap();
+        let Json(graph) = get_scoreboard_graph(State(state), HeaderMap::new())
+            .await
+            .unwrap();
         assert_eq!(graph.len(), 1);
         assert_eq!(graph[0].points, vec![(100, 10), (200, 20)]);
     }
@@ -414,9 +618,174 @@ mod tests {
             .unwrap();
         }
 
-        let Json(profile) = get_team_profile(State(state), Path(1)).await.unwrap();
+        let Json(profile) = get_team_profile(State(state), HeaderMap::new(), Path(1))
+            .await
+            .unwrap();
         assert_eq!(profile.team.name, "A");
+        assert_eq!(profile.team.invite_code, None);
+        assert_eq!(profile.first_bloods, 1);
+        assert_eq!(profile.hints_used, 0);
         assert_eq!(profile.solve_history.len(), 1);
         assert_eq!(profile.solve_history[0].challenge_title, "Challenge");
+    }
+
+    #[tokio::test]
+    async fn team_profile_invite_code_only_visible_to_members() {
+        let state = test_state();
+        let (member_headers, _member) = authed_headers(&state, "member");
+        let Json(team) = create_team(
+            State(state.clone()),
+            member_headers.clone(),
+            Json(CreateTeamRequest {
+                name: "Secret Team".to_string(),
+            }),
+        )
+        .await
+        .unwrap();
+        let (outsider_headers, _outsider) = authed_headers(&state, "outsider");
+
+        let Json(as_member) = get_team_profile(State(state.clone()), member_headers, Path(team.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            as_member.team.invite_code.as_deref(),
+            Some(team.invite_code.as_str())
+        );
+
+        let Json(as_outsider) =
+            get_team_profile(State(state.clone()), outsider_headers, Path(team.id))
+                .await
+                .unwrap();
+        assert_eq!(as_outsider.team.invite_code, None);
+
+        let Json(anonymous) = get_team_profile(State(state), HeaderMap::new(), Path(team.id))
+            .await
+            .unwrap();
+        assert_eq!(anonymous.team.invite_code, None);
+        let json = serde_json::to_value(&anonymous).unwrap();
+        assert!(json["team"].get("invite_code").is_none());
+    }
+
+    #[tokio::test]
+    async fn freeze_hides_later_solves_from_everyone_but_admins() {
+        let state = test_state();
+        let (admin_headers, admin) = authed_headers(&state, "boss");
+        let (player_headers, _player) = authed_headers(&state, "watcher");
+        {
+            let conn = state.db.get().unwrap();
+            conn.execute(
+                "UPDATE users SET role = 'admin' WHERE id = ?1",
+                rusqlite::params![admin.id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO teams (id, name, invite_code, score) VALUES (7, 'Racers', 'RACE0001', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO users (id, username, password_hash, role, team_id, created_at)
+                 VALUES (70, 'racer', 'h', 'player', 7, 1)",
+                [],
+            )
+            .unwrap();
+            for (id, slug) in [(1, 'a'), (2, 'b')] {
+                conn.execute(
+                    "INSERT INTO challenges (
+                        id, slug, title, description, category, flag_hash, flag_salt, flag_type,
+                        flag_case_sensitive, points, max_points, min_points, decay_rate, is_hidden, created_at
+                     ) VALUES (?1, ?2, ?2, 'd', 'web', 'h', 's', 'static', 0, 100, 100, 10, 1, 0, 1)",
+                    rusqlite::params![id, slug.to_string()],
+                )
+                .unwrap();
+            }
+            conn.execute(
+                "INSERT INTO solves (team_id, user_id, challenge_id, solved_at) VALUES (7, 70, 1, 10), (7, 70, 2, 30)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO score_history (team_id, score, recorded_at) VALUES (7, 100, 10), (7, 200, 30)",
+                [],
+            )
+            .unwrap();
+            crate::scoring::recalculate_all_team_scores(&conn).unwrap();
+            crate::competition::freeze(&conn, 20).unwrap();
+        }
+
+        let Json(public) = get_scoreboard(State(state.clone()), player_headers.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            (public.teams[0].score, public.teams[0].solve_count),
+            (100, 1)
+        );
+        let Json(anonymous) = get_scoreboard(State(state.clone()), HeaderMap::new())
+            .await
+            .unwrap();
+        assert_eq!(anonymous.teams[0].score, 100);
+        let Json(live) = get_scoreboard(State(state.clone()), admin_headers.clone())
+            .await
+            .unwrap();
+        assert_eq!(live.teams[0].score, 200);
+
+        let Json(graph) = get_scoreboard_graph(State(state.clone()), player_headers.clone())
+            .await
+            .unwrap();
+        assert_eq!(graph[0].points, vec![(10, 100)]);
+        let Json(admin_graph) = get_scoreboard_graph(State(state.clone()), admin_headers)
+            .await
+            .unwrap();
+        assert_eq!(admin_graph[0].points.len(), 2);
+
+        let Json(profile) = get_team_profile(State(state), player_headers, Path(7))
+            .await
+            .unwrap();
+        assert_eq!(profile.team.score, 100);
+        assert_eq!(profile.solve_history.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn websocket_score_updates_respect_the_freeze() {
+        let state = test_state();
+        let mut rx = state.ws_hub.subscribe();
+        {
+            let conn = state.db.get().unwrap();
+            conn.execute(
+                "INSERT INTO teams (id, name, invite_code, score) VALUES (3, 'Live', 'LIVE0001', 0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO users (id, username, password_hash, role, team_id, created_at)
+                 VALUES (30, 'liver', 'h', 'player', 3, 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO challenges (id, slug, title, description, category, flag_hash,
+                    flag_salt, points, is_hidden, created_at)
+                 VALUES (9, 'late', 'Late', 'd', 'web', 'h', 's', 100, 0, 1)",
+                [],
+            )
+            .unwrap();
+            crate::competition::freeze(&conn, 20).unwrap();
+            conn.execute(
+                "INSERT INTO solves (team_id, user_id, challenge_id, solved_at) VALUES (3, 30, 9, 30)",
+                [],
+            )
+            .unwrap();
+            crate::scoring::recalculate_all_team_scores(&conn).unwrap();
+            broadcast_score_update(&state, &conn);
+        }
+        match rx.try_recv().unwrap() {
+            crate::handlers::ws::WsEvent::ScoreUpdate { scoreboard, .. } => {
+                assert_eq!(
+                    scoreboard[0].score, 0,
+                    "solve after the freeze must not leak"
+                );
+            }
+            other => panic!("expected score update, got {other:?}"),
+        }
     }
 }

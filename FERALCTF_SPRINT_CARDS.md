@@ -330,4 +330,68 @@ responses. Release binary is self-contained.
 
 ---
 
+## SPRINT-14 — v1.0.2 UI/API Consistency + Bug Fixes
+
+**Status:** Complete (v1.0.2)
+
+**Tasks completed:**
+
+- Fix invite code leak on `GET /api/teams/{id}` (members and admins only)
+- Admin hint CRUD + editor (reorder, unlock counts, refund on delete); stable hint ids on overwrite import
+- Hint unlock race fix (`INSERT OR IGNORE`); no unlock after solve; no unlock beyond team score
+- Player hint UX: position labels, cost confirm, in-place reveal, links and line breaks, teamless state
+- URL-only attachments (absolute http/https) with admin CRUD, import warnings, export `url`
+- Recalculate scores on challenge edit/delete; cascade delete; honour `flag_case_sensitive`;
+  guard flag type/case changes; validate regex; enforce `unlock_requires`; `null` clears author/prerequisite
+- Admin user creation with team picker; team reassignment with session revocation
+- Enforce `registration_open`, `max_team_size`, unique team names; no banning admins without demotion
+- Competition state (migration 003): start/end/freeze persisted and enforced; frozen public scoreboard
+- Public announcements + competition status endpoints; WebSocket announcement/first-blood/state handling
+- Real admin Settings, Submissions log, named Users table, profile stats, score graph, show-solved toggle
+- CSP-safe category colours and error page; import body limit; version 1.0.2 injected into the page
+
+**Done when:** `cargo test` passes (100/100), clippy clean, API + browser flows verified.
+
+---
+
+## SPRINT-15 — Branding
+
+**Status:** Complete (v1.0.2)
+
+**Tasks completed:**
+
+- Migration 004 `branding` table; name falls back to config.toml, logo to built-in image
+- `PUT /api/admin/branding` (validated, audited, broadcast); branding in `/api/competition` and admin settings
+- Server-rendered `<title>`; header name/logo and `document.title` from branding; broken logo fallback
+- CSP `img-src` extended with the configured logo origin only; branding cached in `AppCache`
+- Admin Settings Branding form with preview; reload after a new logo origin is saved
+
+**Done when:** `cargo test` passes (105/105) and branding verified in admin and player views.
+
+---
+
+## SPRINT-16 — Reversible Flag Storage
+
+**Status:** Complete (v1.0.2)
+
+**Tasks completed:**
+
+- Add `ring` as a direct dependency (already in the build via rustls) — approval required
+- Generate a 32-byte AES-256 key and one GCM nonce when the DB is first created; store both in the
+  `flag_cipher` table (decided: in-DB key, shared nonce — accepted risk for game flags)
+- Migration 005: `flag_cipher` table + `challenges.flag_ciphertext` (idempotent column check)
+- Encrypt static/dynamic flags with AES-256-GCM (shared key + nonce) on create/update/import
+- Keep `verify_submission` hash-only; never decrypt at runtime
+- `GET /api/admin/challenges/{id}/flag` reveal endpoint, audited; never expose ciphertext elsewhere
+- Admin edit modal "Reveal flag"; legacy rows prompt to re-enter the flag
+- Backwards compatible: existing DBs upgrade on start; encryption is best-effort (`try_encrypt`),
+  reveal reports decrypt problems instead of failing
+- Browser UI test suite: `python3 tests/ui/run_ui_tests.py` (Selenium + requests in a
+  self-created `tests/ui/.venv`; Selenium Manager downloads Chrome for Testing if Chrome is absent)
+
+**Done when:** round-trip, tamper, key-persistence, hash-only verification, access-control,
+missing-key and upgrade tests pass (116/116); v1.0.1 database upgrade verified. See FERALCTF_SPRINTS.md §Sprint 16 for design and open decisions.
+
+---
+
 FeralCTF — Apache 2.0 · CyberSquirrels CTF Team

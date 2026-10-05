@@ -65,6 +65,10 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Human Approval Gate
+
+**Never commit.** Never run `git commit` (or push, tag, or otherwise create commits) in this project. Committing is a human approval gate: leave changes in the working tree, report what changed and how it was verified, and let a person review and commit.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to
